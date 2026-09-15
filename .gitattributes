@@ -1,0 +1,17 @@
+# 줄바꿈은 저장소에 LF 로 통일한다. 집/학교 PC 를 오갈 때 파일 전체가
+# 바뀐 것으로 보이는 일을 막는다.
+* text=auto
+
+# Unity 자산은 텍스트로 다루되 병합은 사람이 한다.
+*.unity   -merge
+*.prefab  -merge
+*.asset   -merge
+*.meta    -merge
+
+# 바이너리
+*.png binary
+*.jpg binary
+*.wav binary
+*.mp3 binary
+*.fbx binary
+*.dll binary
