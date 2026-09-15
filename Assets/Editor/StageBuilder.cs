@@ -236,6 +236,7 @@ namespace Stealth.EditorTools
                 }
             }
 
+            BuildFloorDetail(root.transform, width, height);
             BuildMarkers(root.transform, stage, width, height);
             BuildVents(root.transform, stage, width, height);
 
@@ -326,7 +327,88 @@ namespace Stealth.EditorTools
                         new Vector3(length, h, Cell * (isWall ? 1f : 0.9f)),
                         isWall ? wallMat : shelfMat);
                     box.isStatic = true;
+
+                    // 장식을 얹는다. 콜라이더가 없어서 이동·시야 판정은 그대로다.
+                    if (isWall) DecorateWall(box.transform);
+                    else DecorateShelf(box.transform);
                 }
+            }
+        }
+
+        /// <summary>
+        /// 벽에 상단 몰딩과 허리 높이 띠를 붙인다.
+        ///
+        /// 좌표는 부모(벽 박스) 기준이라 -0.5 ~ +0.5 범위다. 부모가 아무리 길어도
+        /// 같은 값이 그대로 통하기 때문에, 길이를 신경 쓰지 않고 붙일 수 있다.
+        ///
+        /// 살짝 튀어나오게(1.02배) 만들어야 보인다. 안쪽에 넣으면 부모에 파묻혀 안 보인다.
+        /// 튀어나오는 양이 2cm 라 통로 폭에는 영향이 없다.
+        /// </summary>
+        static void DecorateWall(Transform wall)
+        {
+            Material cap = MaterialFor("Greybox_WallCap", new Color(0.22f, 0.23f, 0.28f));
+            Material line = MaterialFor("Greybox_WallLine", new Color(0.45f, 0.47f, 0.54f));
+
+            // 천장 쪽 몰딩
+            var top = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            top.name = "Cap";
+            top.transform.SetParent(wall, false);
+            top.transform.localPosition = new Vector3(0f, 0.43f, 0f);
+            top.transform.localScale = new Vector3(1.01f, 0.12f, 1.03f);
+            StripCollider(top);
+            top.GetComponent<Renderer>().sharedMaterial = cap;
+
+            // 허리 높이 띠. 벽이 통짜로 보이지 않게 가로선을 하나 넣는 것이 핵심이다.
+            var belt = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            belt.name = "Line";
+            belt.transform.SetParent(wall, false);
+            belt.transform.localPosition = new Vector3(0f, -0.10f, 0f);
+            belt.transform.localScale = new Vector3(1.01f, 0.035f, 1.02f);
+            StripCollider(belt);
+            belt.GetComponent<Renderer>().sharedMaterial = line;
+
+            // 바닥 걸레받이
+            var skirt = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            skirt.name = "Skirt";
+            skirt.transform.SetParent(wall, false);
+            skirt.transform.localPosition = new Vector3(0f, -0.44f, 0f);
+            skirt.transform.localScale = new Vector3(1.01f, 0.10f, 1.02f);
+            StripCollider(skirt);
+            skirt.GetComponent<Renderer>().sharedMaterial = cap;
+        }
+
+        /// <summary>
+        /// 선반에 가로 판자와 양끝 기둥을 붙인다.
+        /// 통짜 나무 상자였던 것이 '층이 있는 선반'으로 읽히게 만드는 것이 목적이다.
+        /// </summary>
+        static void DecorateShelf(Transform shelf)
+        {
+            Material board = MaterialFor("Greybox_ShelfBoard", new Color(0.55f, 0.43f, 0.29f));
+            Material post = MaterialFor("Greybox_ShelfPost", new Color(0.24f, 0.18f, 0.13f));
+
+            // 층 판자 세 장. 위에서 내려다보는 시점이라 맨 위 판이 제일 잘 보인다.
+            foreach (float y in new[] { 0.46f, 0.08f, -0.30f })
+            {
+                var plank = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                plank.name = "Board";
+                plank.transform.SetParent(shelf, false);
+                plank.transform.localPosition = new Vector3(0f, y, 0f);
+                plank.transform.localScale = new Vector3(1.005f, 0.055f, 1.06f);
+                StripCollider(plank);
+                plank.GetComponent<Renderer>().sharedMaterial = board;
+            }
+
+            // 양끝 기둥. localScale.x 가 1이면 부모 길이와 같으므로,
+            // 얇게 만들어 좌우 끝에 붙이면 길이에 상관없이 항상 끝에 온다.
+            for (int side = -1; side <= 1; side += 2)
+            {
+                var leg = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                leg.name = side < 0 ? "Post_L" : "Post_R";
+                leg.transform.SetParent(shelf, false);
+                leg.transform.localPosition = new Vector3(side * 0.485f, 0f, 0f);
+                leg.transform.localScale = new Vector3(0.035f, 1.01f, 1.07f);
+                StripCollider(leg);
+                leg.GetComponent<Renderer>().sharedMaterial = post;
             }
         }
 
@@ -423,9 +505,79 @@ namespace Stealth.EditorTools
                         prop.transform.localPosition = offset + Vector3.up * (h * 0.5f);
                         prop.transform.localRotation = Quaternion.Euler(0f, placed * 17f, 0f);
                         prop.GetComponent<Renderer>().sharedMaterial = barrel ? barrelMat : crateMat;
+
+                        // 장식을 얹는다. 오크통에는 쇠테, 상자에는 판자 보강대.
+                        // 콜라이더는 떼어내므로 NavMesh 나 시야 판정에는 영향이 없다.
+                        if (barrel) DecorateBarrel(prop.transform);
+                        else DecorateCrate(prop.transform);
                         prop.isStatic = true;
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// 오크통에 쇠테 두 줄을 두른다. 민무늬 원기둥과 '통'을 가르는 것이 이 두 줄이다.
+        /// 부모의 크기를 물려받으므로 좌표는 원기둥 원본 기준(높이 -1 ~ +1)이다.
+        /// </summary>
+        static void DecorateBarrel(Transform barrel)
+        {
+            Material band = MaterialFor("Prop_BarrelBand", new Color(0.22f, 0.22f, 0.25f));
+
+            foreach (float y in new[] { 0.45f, -0.45f })
+            {
+                var ring = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                ring.name = "Band";
+                ring.transform.SetParent(barrel, false);
+                ring.transform.localPosition = new Vector3(0f, y, 0f);
+                ring.transform.localScale = new Vector3(1.06f, 0.09f, 1.06f);
+                StripCollider(ring);
+                ring.GetComponent<Renderer>().sharedMaterial = band;
+            }
+
+            // 뚜껑. 윗면 색이 달라야 위에서 내려다보는 쿼터뷰에서 형태가 읽힌다.
+            var lid = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            lid.name = "Lid";
+            lid.transform.SetParent(barrel, false);
+            lid.transform.localPosition = new Vector3(0f, 0.98f, 0f);
+            lid.transform.localScale = new Vector3(0.94f, 0.05f, 0.94f);
+            StripCollider(lid);
+            lid.GetComponent<Renderer>().sharedMaterial =
+                MaterialFor("Prop_BarrelLid", new Color(0.26f, 0.16f, 0.11f));
+        }
+
+        /// <summary>
+        /// 나무 상자에 모서리 판자와 윗면 십자 보강대를 붙인다.
+        /// 단색 정육면체는 무엇인지 안 읽히는데, 선 몇 줄이면 바로 상자가 된다.
+        /// </summary>
+        static void DecorateCrate(Transform crate)
+        {
+            Material plank = MaterialFor("Prop_CratePlank", new Color(0.30f, 0.21f, 0.12f));
+
+            // 위·아래 가로 띠
+            foreach (float y in new[] { 0.34f, -0.34f })
+            {
+                var belt = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                belt.name = "Plank";
+                belt.transform.SetParent(crate, false);
+                belt.transform.localPosition = new Vector3(0f, y, 0f);
+                belt.transform.localScale = new Vector3(1.04f, 0.12f, 1.04f);
+                StripCollider(belt);
+                belt.GetComponent<Renderer>().sharedMaterial = plank;
+            }
+
+            // 윗면 십자. 위에서 내려다보는 시점이라 여기가 제일 잘 보인다.
+            for (int i = 0; i < 2; i++)
+            {
+                var bar = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                bar.name = "TopBar";
+                bar.transform.SetParent(crate, false);
+                bar.transform.localPosition = new Vector3(0f, 0.51f, 0f);
+                bar.transform.localScale = i == 0
+                    ? new Vector3(1.02f, 0.04f, 0.16f)
+                    : new Vector3(0.16f, 0.04f, 1.02f);
+                StripCollider(bar);
+                bar.GetComponent<Renderer>().sharedMaterial = plank;
             }
         }
 
@@ -445,6 +597,49 @@ namespace Stealth.EditorTools
 
             Debug.LogWarning($"[StageBuilder] ({x},{y}) 은신처에 들어갈 방향이 없습니다. 레이아웃을 확인하세요.");
             return 2;
+        }
+
+        /// <summary>
+        /// 바닥 타일 눈금. 통짜 회색 판이던 바닥에 격자선을 그어 넓이와 거리가 읽히게 한다.
+        ///
+        /// ★ 반드시 NavMesh 베이크가 끝난 뒤에 불러야 한다.
+        ///   NavMeshSurface 가 RenderMeshes 모드라 콜라이더가 아니라 '보이는 메시'를 읽는다.
+        ///   베이크 전에 만들면 이 얇은 판들이 지형으로 잡혀 바닥에 미세한 턱이 생기고,
+        ///   경비가 그 턱에 걸려 길을 못 찾는다. StripCollider 로는 막을 수 없다.
+        ///
+        /// 칸마다 네모를 놓으면 47x25 = 1175개가 되므로, 줄 하나를 통으로 긋는다.
+        /// 가로 26줄 + 세로 48줄 = 74개면 끝난다.
+        /// </summary>
+        static void BuildFloorDetail(Transform parent, int width, int height)
+        {
+            var root = new GameObject("FloorDetail").transform;
+            root.SetParent(parent, false);
+
+            Material line = MaterialFor("Greybox_FloorLine", new Color(0.23f, 0.25f, 0.29f));
+
+            float halfW = width * Cell * 0.5f;
+            float halfH = height * Cell * 0.5f;
+            const float y = 0.012f;      // 바닥(윗면 0)보다 아주 조금 위
+            const float thickness = 0.05f;
+
+            // 세로선 — 칸 경계마다 한 줄
+            for (int x = 0; x <= width; x++)
+            {
+                float px = -halfW + x * Cell;
+                CreateBox(root, $"GridZ_{x}", new Vector3(px, y, 0f),
+                    new Vector3(thickness, 0.01f, height * Cell), line).name = $"GridZ_{x}";
+            }
+
+            // 가로선
+            for (int z = 0; z <= height; z++)
+            {
+                float pz = -halfH + z * Cell;
+                CreateBox(root, $"GridX_{z}", new Vector3(0f, y, pz),
+                    new Vector3(width * Cell, 0.01f, thickness), line).name = $"GridX_{z}";
+            }
+
+            // 격자선에 콜라이더가 남아 있으면 동전이 튕기거나 레이캐스트에 걸린다.
+            foreach (Transform child in root) StripCollider(child.gameObject);
         }
 
         /// <summary>
@@ -558,6 +753,39 @@ namespace Stealth.EditorTools
             grate.GetComponent<Renderer>().sharedMaterial =
                 MaterialFor("Vent_Grate", new Color(0.45f, 0.55f, 0.68f), "Universal Render Pipeline/Unlit");
 
+            // 살창. 어두운 막대 네 개를 얹으면 '구멍'이 아니라 '환풍구'로 읽힌다.
+            Material slat = MaterialFor("Vent_Slat", new Color(0.13f, 0.16f, 0.21f));
+            for (int i = 0; i < 4; i++)
+            {
+                var bar = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                bar.name = $"Slat {i + 1}";
+                bar.transform.SetParent(vent.transform, false);
+                // -0.45 부터 0.3 간격으로 네 줄
+                bar.transform.localPosition = new Vector3(0f, 0.11f, -0.45f + i * 0.3f);
+                bar.transform.localScale = new Vector3(1.3f, 0.05f, 0.13f);
+                StripCollider(bar);
+                bar.GetComponent<Renderer>().sharedMaterial = slat;
+            }
+
+            // 테두리 프레임 — 네 변에 얇은 막대를 둘러 금속판 느낌을 준다.
+            for (int i = 0; i < 4; i++)
+            {
+                bool horizontal = i < 2;
+                float sign = (i % 2 == 0) ? -1f : 1f;
+
+                var edge = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                edge.name = $"Frame {i + 1}";
+                edge.transform.SetParent(vent.transform, false);
+                edge.transform.localPosition = horizontal
+                    ? new Vector3(0f, 0.11f, sign * 0.72f)
+                    : new Vector3(sign * 0.72f, 0.11f, 0f);
+                edge.transform.localScale = horizontal
+                    ? new Vector3(1.5f, 0.06f, 0.12f)
+                    : new Vector3(0.12f, 0.06f, 1.5f);
+                StripCollider(edge);
+                edge.GetComponent<Renderer>().sharedMaterial = slat;
+            }
+
             var comp = vent.AddComponent<Vent>();
             comp.grateRenderer = grate.GetComponent<Renderer>();
             comp.displayName = $"환풍구 {id}";
@@ -597,6 +825,30 @@ namespace Stealth.EditorTools
             arm.GetComponent<Renderer>().sharedMaterial =
                 MaterialFor("Prop_LeverArm", new Color(0.75f, 0.68f, 0.25f), "Universal Render Pipeline/Unlit");
 
+            // 배전반 앞판 — 본체보다 밝게 해서 '뚜껑이 달린 상자'로 보이게 한다.
+            var panel = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            panel.name = "Panel";
+            panel.transform.SetParent(lever.transform, false);
+            panel.transform.localPosition = new Vector3(0f, 0.55f, -0.19f);
+            panel.transform.localScale = new Vector3(0.56f, 0.9f, 0.04f);
+            StripCollider(panel);
+            panel.GetComponent<Renderer>().sharedMaterial =
+                MaterialFor("Prop_LeverPanel", new Color(0.38f, 0.41f, 0.47f));
+
+            // 경고 줄무늬. 노랑·검정 사선은 "함부로 만지면 안 되는 것"의 만국 공통 표시다.
+            Material warn = MaterialFor("Prop_LeverWarn", new Color(0.92f, 0.76f, 0.18f));
+            for (int i = 0; i < 3; i++)
+            {
+                var stripe = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                stripe.name = $"Warn {i + 1}";
+                stripe.transform.SetParent(lever.transform, false);
+                stripe.transform.localPosition = new Vector3(-0.18f + i * 0.18f, 0.22f, -0.21f);
+                stripe.transform.localRotation = Quaternion.Euler(0f, 0f, 28f);
+                stripe.transform.localScale = new Vector3(0.07f, 0.26f, 0.03f);
+                StripCollider(stripe);
+                stripe.GetComponent<Renderer>().sharedMaterial = warn;
+            }
+
             var lamp = GameObject.CreatePrimitive(PrimitiveType.Cube);
             lamp.name = "StatusLamp";
             lamp.transform.SetParent(lever.transform, false);
@@ -611,16 +863,49 @@ namespace Stealth.EditorTools
             comp.statusRenderer = lamp.GetComponent<Renderer>();
         }
 
+        /// <summary>
+        /// 크롤 통로 바닥 표시. 벽에 뚫린 낮은 구멍이라는 것이 한눈에 읽혀야 한다.
+        /// 여기는 NavMesh 베이크가 끝난 뒤(BuildMarkers)라 자유롭게 만들어도 된다.
+        /// </summary>
         static void BuildCrawlMarker(Transform parent, Vector3 position, int index)
         {
+            var group = new GameObject($"CrawlGap {index}").transform;
+            group.SetParent(parent, false);
+            group.position = new Vector3(position.x, 0f, position.z);
+
             var patch = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            patch.name = $"CrawlGap {index}";
-            patch.transform.SetParent(parent, false);
-            patch.transform.localPosition = new Vector3(position.x, 0.03f, position.z);
+            patch.name = "Patch";
+            patch.transform.SetParent(group, false);
+            patch.transform.localPosition = new Vector3(0f, 0.03f, 0f);
             patch.transform.localScale = new Vector3(Cell * 0.85f, 0.02f, Cell * 0.85f);
             StripCollider(patch);
             patch.GetComponent<Renderer>().sharedMaterial =
                 MaterialFor("Marker_Crawl", new Color(0.35f, 0.8f, 1f, 0.28f), "Stealth/FOVCone");
+
+            Material stripe = MaterialFor("Marker_CrawlStripe", new Color(0.55f, 0.9f, 1f),
+                "Universal Render Pipeline/Unlit");
+
+            // 통로 양옆 바닥에 짧은 유도선. "이 축으로 지나간다"를 알려준다.
+            for (int side = -1; side <= 1; side += 2)
+            {
+                var guide = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                guide.name = side < 0 ? "Guide_L" : "Guide_R";
+                guide.transform.SetParent(group, false);
+                guide.transform.localPosition = new Vector3(side * Cell * 0.42f, 0.04f, 0f);
+                guide.transform.localScale = new Vector3(0.10f, 0.02f, Cell * 0.80f);
+                StripCollider(guide);
+                guide.GetComponent<Renderer>().sharedMaterial = stripe;
+            }
+
+            // 상인방 아래쪽에 매달린 경고 띠. 서서 들어가면 막힌다는 신호다.
+            var lip = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            lip.name = "ClearanceBar";
+            lip.transform.SetParent(group, false);
+            lip.transform.localPosition = new Vector3(0f, CrawlClearance - 0.06f, 0f);
+            lip.transform.localScale = new Vector3(Cell * 0.92f, 0.10f, Cell * 0.92f);
+            StripCollider(lip);
+            lip.GetComponent<Renderer>().sharedMaterial =
+                MaterialFor("Marker_CrawlLip", new Color(0.92f, 0.76f, 0.18f));
         }
 
         static void BuildHideSpot(Transform parent, Vector3 position, int index, Vector3 exitDirection)
@@ -638,6 +923,31 @@ namespace Stealth.EditorTools
             StripCollider(patch);
             patch.GetComponent<Renderer>().sharedMaterial =
                 MaterialFor("Marker_HideSpot", new Color(0.35f, 0.75f, 1f, 0f), "Stealth/FOVCone");
+
+            // ↓ 아래는 장식이다. patch 만 HideSpot 이 색을 바꾸므로 나머지는 항상 같은 색이다.
+
+            // 통 더미 사이에 깔린 낡은 자루 — 숨을 자리가 실제로 있다는 인상을 준다.
+            var sack = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            sack.name = "Sack";
+            sack.transform.SetParent(spot.transform, false);
+            sack.transform.localPosition = new Vector3(0f, 0.16f, 0f);
+            sack.transform.localScale = new Vector3(0.78f, 0.32f, 0.62f);
+            sack.transform.localRotation = Quaternion.Euler(0f, 22f, 0f);
+            StripCollider(sack);
+            sack.GetComponent<Renderer>().sharedMaterial =
+                MaterialFor("Prop_Sack", new Color(0.36f, 0.31f, 0.22f));
+
+            // 들어가는 방향에 깔린 발판. 어느 쪽이 입구인지 바닥만 봐도 알 수 있다.
+            // exitDirection 은 소품이 트인 방향이므로 그대로 쓰면 된다.
+            var step = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            step.name = "Entry";
+            step.transform.SetParent(spot.transform, false);
+            step.transform.localPosition = exitDirection.normalized * 0.95f + Vector3.up * 0.035f;
+            step.transform.localRotation = Quaternion.LookRotation(exitDirection.normalized, Vector3.up);
+            step.transform.localScale = new Vector3(0.95f, 0.02f, 0.34f);
+            StripCollider(step);
+            step.GetComponent<Renderer>().sharedMaterial =
+                MaterialFor("Marker_HideEntry", new Color(0.45f, 0.85f, 1f, 0.35f), "Stealth/FOVCone");
 
             var comp = spot.AddComponent<HideSpot>();
             comp.interactRange = 1.5f;
@@ -671,7 +981,8 @@ namespace Stealth.EditorTools
             cc.slopeLimit = 45f;
             cc.stepOffset = 0.3f;
 
-            Material mat = MaterialFor("Actor_Player", new Color(0.25f, 0.78f, 1.00f));
+            // 도둑. 짙은 남색 상하의에 흰 줄무늬, 눈만 내놓은 검은 복면.
+            Material mat = MaterialFor("Actor_Player", new Color(0.19f, 0.21f, 0.33f));
 
             var body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             body.name = "Body";
@@ -681,13 +992,35 @@ namespace Stealth.EditorTools
             StripCollider(body);
             body.GetComponent<Renderer>().sharedMaterial = mat;
 
+            // 장식은 전부 몸통의 자식으로 붙인다. 웅크릴 때 몸통이 납작해지면 얼굴도 같이
+            // 눌려서 "엎드린" 실루엣이 된다. 몸통 밖에 두면 얼굴만 공중에 떠버린다.
+            BuildFaceBand(body.transform, "Mask", 0.62f, 0.26f,
+                MaterialFor("Actor_PlayerMask", new Color(0.09f, 0.10f, 0.14f)));
+            BuildEyes(body.transform, 0.63f, new Color(0.95f, 0.97f, 1f));
+
+            // 가슴 줄무늬 — 캡슐 사람 스타일의 핵심 요소다. 이것만으로 옷을 입은 것처럼 보인다.
+            BuildFaceBand(body.transform, "Stripe", 0.05f, 0.16f,
+                MaterialFor("Actor_PlayerStripe", new Color(0.86f, 0.89f, 0.94f)));
+
+            // 등에 멘 가방. 뒤쪽에서 봐도 도둑이라는 것이 읽힌다.
+            var pack = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            pack.name = "Backpack";
+            pack.transform.SetParent(body.transform, false);
+            pack.transform.localPosition = new Vector3(0f, 0.18f, -0.52f);
+            pack.transform.localScale = new Vector3(0.52f, 0.42f, 0.30f);
+            StripCollider(pack);
+            pack.GetComponent<Renderer>().sharedMaterial =
+                MaterialFor("Actor_PlayerPack", new Color(0.13f, 0.14f, 0.19f));
+
+            // 방향 표시. 얼굴이 생겼으므로 눈에 덜 띄게 줄이고 몸 색에 맞춘다.
             var nose = GameObject.CreatePrimitive(PrimitiveType.Cube);
             nose.name = "FacingMarker";
             nose.transform.SetParent(player.transform, false);
             nose.transform.localPosition = new Vector3(0f, 1.25f, 0.42f);
-            nose.transform.localScale = new Vector3(0.16f, 0.16f, 0.5f);
+            nose.transform.localScale = new Vector3(0.10f, 0.10f, 0.34f);
             StripCollider(nose);
-            nose.GetComponent<Renderer>().sharedMaterial = mat;
+            nose.GetComponent<Renderer>().sharedMaterial =
+                MaterialFor("Actor_PlayerStripe", new Color(0.86f, 0.89f, 0.94f));
 
             // 정전 중 플레이어 주변만 비추는 조명. 평소에는 꺼져 있다.
             var lightObject = new GameObject("BlackoutLight");
@@ -762,6 +1095,48 @@ namespace Stealth.EditorTools
             throwAbility.aimRenderer = aim.GetComponent<Renderer>();
         }
 
+        /// <summary>
+        /// 캡슐 몸통을 가로로 두르는 띠. 복면·줄무늬·벨트를 전부 이걸로 만든다.
+        ///
+        /// 캡슐 몸통의 자식으로 붙이므로 좌표가 부모 기준이다. 캡슐 원본의 높이가 2라
+        /// localY 는 대략 -1(발) ~ +1(머리 끝) 범위를 쓴다.
+        /// </summary>
+        /// <param name="localY">몸통 기준 높이. 0.6 쯤이 얼굴, 0 이 가슴, -0.1 이 허리.</param>
+        /// <param name="thickness">띠의 두께.</param>
+        static void BuildFaceBand(Transform body, string name, float localY, float thickness, Material material)
+        {
+            // 실린더를 아주 납작하게 눌러 띠로 쓴다. 캡슐보다 아주 조금 굵게 해서 파묻히지 않게 한다.
+            var band = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            band.name = name;
+            band.transform.SetParent(body, false);
+            band.transform.localPosition = new Vector3(0f, localY, 0f);
+            band.transform.localScale = new Vector3(1.02f, thickness * 0.5f, 1.02f);
+            StripCollider(band);
+            band.GetComponent<Renderer>().sharedMaterial = material;
+        }
+
+        /// <summary>
+        /// 눈 두 개. 이것 하나로 캡슐이 사람으로 읽힌다 — 가장 비용 대비 효과가 큰 장식이다.
+        /// 앞쪽(+Z)에 붙이므로 바라보는 방향도 같이 알려준다.
+        /// </summary>
+        static void BuildEyes(Transform body, float localY, Color color)
+        {
+            Material mat = MaterialFor($"Actor_Eye_{ColorUtility.ToHtmlStringRGB(color)}", color,
+                "Universal Render Pipeline/Unlit");
+
+            // 좌우 한 쌍. -1 과 +1 을 곱해 대칭으로 놓는다.
+            for (int side = -1; side <= 1; side += 2)
+            {
+                var eye = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                eye.name = side < 0 ? "Eye_L" : "Eye_R";
+                eye.transform.SetParent(body, false);
+                eye.transform.localPosition = new Vector3(side * 0.24f, localY, 0.42f);
+                eye.transform.localScale = new Vector3(0.20f, 0.16f, 0.20f);
+                StripCollider(eye);
+                eye.GetComponent<Renderer>().sharedMaterial = mat;
+            }
+        }
+
         static void BuildGuard(Transform parent, Vector2Int[] route, int index, int width, int height)
         {
             Vector3 spawn = GridToWorld(route[0].x, route[0].y, width, height);
@@ -784,7 +1159,9 @@ namespace Stealth.EditorTools
             agent.stoppingDistance = 0.15f;
             agent.autoBraking = true;
 
-            Material mat = MaterialFor("Actor_Guard", new Color(0.82f, 0.32f, 0.30f));
+            // 경찰. 남색 제복에 하늘색 견장 줄무늬, 챙 달린 정모.
+            // 도둑(짙은 남색 + 흰 줄)과 색이 비슷하지만 모자와 줄 색으로 구분된다.
+            Material mat = MaterialFor("Actor_Guard", new Color(0.20f, 0.27f, 0.47f));
 
             var body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             body.name = "Body";
@@ -794,13 +1171,52 @@ namespace Stealth.EditorTools
             StripCollider(body);
             body.GetComponent<Renderer>().sharedMaterial = mat;
 
+            Material trim = MaterialFor("Actor_GuardTrim", new Color(0.62f, 0.84f, 1f));
+
+            // 얼굴. 경비는 웅크리지 않으므로 위치 계산이 단순하다.
+            BuildFaceBand(body.transform, "Face", 0.60f, 0.24f,
+                MaterialFor("Actor_GuardSkin", new Color(0.93f, 0.80f, 0.68f)));
+            BuildEyes(body.transform, 0.61f, new Color(0.12f, 0.13f, 0.17f));
+
+            // 어깨 줄무늬 — 제복 느낌을 내는 가장 싼 방법.
+            BuildFaceBand(body.transform, "Trim", 0.30f, 0.09f, trim);
+            BuildFaceBand(body.transform, "Belt", -0.06f, 0.12f,
+                MaterialFor("Actor_GuardBelt", new Color(0.10f, 0.11f, 0.15f)));
+
+            // 정모 — 눌러 놓은 구 + 앞챙. 이 둘만으로 '경찰'이 바로 읽힌다.
+            var capTop = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            capTop.name = "CapTop";
+            capTop.transform.SetParent(body.transform, false);
+            capTop.transform.localPosition = new Vector3(0f, 0.78f, 0f);
+            capTop.transform.localScale = new Vector3(1.03f, 0.42f, 1.03f);
+            StripCollider(capTop);
+            capTop.GetComponent<Renderer>().sharedMaterial = mat;
+
+            var capBrim = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            capBrim.name = "CapBrim";
+            capBrim.transform.SetParent(body.transform, false);
+            capBrim.transform.localPosition = new Vector3(0f, 0.74f, 0.42f);
+            capBrim.transform.localScale = new Vector3(0.76f, 0.06f, 0.42f);
+            StripCollider(capBrim);
+            capBrim.GetComponent<Renderer>().sharedMaterial =
+                MaterialFor("Actor_GuardBelt", new Color(0.10f, 0.11f, 0.15f));
+
+            var capBadge = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            capBadge.name = "CapBadge";
+            capBadge.transform.SetParent(body.transform, false);
+            capBadge.transform.localPosition = new Vector3(0f, 0.80f, 0.40f);
+            capBadge.transform.localScale = new Vector3(0.20f, 0.14f, 0.12f);
+            StripCollider(capBadge);
+            capBadge.GetComponent<Renderer>().sharedMaterial = trim;
+
+            // 방향 표시. 모자챙이 앞을 알려주므로 작게 줄인다.
             var nose = GameObject.CreatePrimitive(PrimitiveType.Cube);
             nose.name = "FacingMarker";
             nose.transform.SetParent(guard.transform, false);
             nose.transform.localPosition = new Vector3(0f, 1.25f, 0.42f);
-            nose.transform.localScale = new Vector3(0.16f, 0.16f, 0.5f);
+            nose.transform.localScale = new Vector3(0.10f, 0.10f, 0.30f);
             StripCollider(nose);
-            nose.GetComponent<Renderer>().sharedMaterial = mat;
+            nose.GetComponent<Renderer>().sharedMaterial = trim;
 
             var indicator = GameObject.CreatePrimitive(PrimitiveType.Cube);
             indicator.name = "StateIndicator";
@@ -858,21 +1274,68 @@ namespace Stealth.EditorTools
             drone.transform.SetParent(parent, false);
             drone.transform.position = spawn;
 
-            Material mat = MaterialFor("Actor_Drone", new Color(0.30f, 0.42f, 0.58f));
+            Material mat = MaterialFor("Actor_Drone", new Color(0.26f, 0.32f, 0.44f));
+            Material dark = MaterialFor("Actor_DroneDark", new Color(0.12f, 0.14f, 0.19f));
 
-            var body = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            // 동체를 납작한 구로 만들면 큐브보다 '기계'보다는 '비행체'로 읽힌다.
+            var body = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             body.name = "Body";
             body.transform.SetParent(drone.transform, false);
-            body.transform.localScale = new Vector3(0.7f, 0.25f, 0.7f);
+            body.transform.localScale = new Vector3(0.68f, 0.34f, 0.68f);
             StripCollider(body);
             body.GetComponent<Renderer>().sharedMaterial = mat;
 
+            // 쿼드콥터의 팔 네 개와 로터. 대각선 네 방향에 같은 것을 놓는다.
+            // 회전은 하지 않는다 — 돌리려면 컴포넌트가 필요한데, 쿼터뷰에서는 멀어서 티가 안 난다.
+            for (int i = 0; i < 4; i++)
+            {
+                float angle = 45f + i * 90f;
+                Vector3 dir = Quaternion.Euler(0f, angle, 0f) * Vector3.forward;
+
+                var arm = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                arm.name = $"Arm {i + 1}";
+                arm.transform.SetParent(drone.transform, false);
+                arm.transform.localPosition = dir * 0.34f;
+                arm.transform.localRotation = Quaternion.Euler(0f, angle, 0f);
+                arm.transform.localScale = new Vector3(0.10f, 0.07f, 0.52f);
+                StripCollider(arm);
+                arm.GetComponent<Renderer>().sharedMaterial = dark;
+
+                var rotor = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                rotor.name = $"Rotor {i + 1}";
+                rotor.transform.SetParent(drone.transform, false);
+                rotor.transform.localPosition = dir * 0.56f + Vector3.up * 0.06f;
+                rotor.transform.localScale = new Vector3(0.40f, 0.012f, 0.40f);
+                StripCollider(rotor);
+                rotor.GetComponent<Renderer>().sharedMaterial =
+                    MaterialFor("Actor_DroneRotor", new Color(0.55f, 0.60f, 0.68f, 0.55f), "Stealth/FOVCone");
+            }
+
+            // 위쪽 경광등. 빨간 점 하나로 '감시 중'이라는 인상이 확 올라간다.
+            var beacon = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            beacon.name = "Beacon";
+            beacon.transform.SetParent(drone.transform, false);
+            beacon.transform.localPosition = new Vector3(0f, 0.17f, 0f);
+            beacon.transform.localScale = Vector3.one * 0.16f;
+            StripCollider(beacon);
+            beacon.GetComponent<Renderer>().sharedMaterial =
+                MaterialFor("Actor_DroneBeacon", new Color(1f, 0.30f, 0.28f), "Universal Render Pipeline/Unlit");
+
             // 아래를 향한 렌즈. 드론이 무엇을 보고 있는지 한눈에 알 수 있게 한다.
+            // 검은 하우징으로 감싸면 카메라처럼 보인다.
+            var housing = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            housing.name = "LensHousing";
+            housing.transform.SetParent(drone.transform, false);
+            housing.transform.localPosition = new Vector3(0f, -0.14f, 0f);
+            housing.transform.localScale = new Vector3(0.36f, 0.07f, 0.36f);
+            StripCollider(housing);
+            housing.GetComponent<Renderer>().sharedMaterial = dark;
+
             var lens = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             lens.name = "Lens";
             lens.transform.SetParent(drone.transform, false);
-            lens.transform.localPosition = new Vector3(0f, -0.18f, 0f);
-            lens.transform.localScale = Vector3.one * 0.3f;
+            lens.transform.localPosition = new Vector3(0f, -0.22f, 0f);
+            lens.transform.localScale = Vector3.one * 0.26f;
             StripCollider(lens);
             lens.GetComponent<Renderer>().sharedMaterial =
                 MaterialFor("Actor_DroneLens", new Color(0.55f, 0.85f, 1f), "Universal Render Pipeline/Unlit");
@@ -918,6 +1381,8 @@ namespace Stealth.EditorTools
             objective.transform.SetParent(parent, false);
             objective.transform.position = position;
 
+            // Visual 은 Objective 가 회전·상하 운동을 시키는 대상이다. 장식은 전부 이 아래에 붙여야
+            // 같이 돈다. 바깥에 두면 서류만 돌고 테두리는 가만히 있는 이상한 그림이 된다.
             var visual = GameObject.CreatePrimitive(PrimitiveType.Cube);
             visual.name = "Visual";
             visual.transform.SetParent(objective.transform, false);
@@ -926,11 +1391,50 @@ namespace Stealth.EditorTools
             visual.transform.localRotation = Quaternion.Euler(25f, 0f, 25f);
             StripCollider(visual);
 
+            Color coreColor = prize ? new Color(0.45f, 1f, 0.95f) : new Color(1f, 0.82f, 0.25f);
+
             visual.GetComponent<Renderer>().sharedMaterial = prize
-                ? MaterialFor("Objective_Prize", new Color(0.45f, 1f, 0.95f),
+                ? MaterialFor("Objective_Prize", coreColor, "Universal Render Pipeline/Unlit")
+                : MaterialFor("Objective_Gold", coreColor, "Universal Render Pipeline/Unlit");
+
+            // 서류철 느낌 — 정육면체 옆구리에 종이 묶음처럼 얇은 판을 겹쳐 붙인다.
+            Material paper = MaterialFor("Objective_Paper", new Color(0.96f, 0.95f, 0.90f),
+                "Universal Render Pipeline/Unlit");
+            for (int i = 0; i < 3; i++)
+            {
+                var sheet = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                sheet.name = $"Sheet {i + 1}";
+                sheet.transform.SetParent(visual.transform, false);
+                sheet.transform.localPosition = new Vector3(0f, -0.22f + i * 0.22f, 0f);
+                sheet.transform.localScale = new Vector3(1.08f, 0.10f, 1.08f);
+                StripCollider(sheet);
+                sheet.GetComponent<Renderer>().sharedMaterial = paper;
+            }
+
+            // 봉인 띠. 고액 자료는 붉은 '1급 기밀' 띠를 둘러 한눈에 구분되게 한다.
+            var seal = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            seal.name = "Seal";
+            seal.transform.SetParent(visual.transform, false);
+            seal.transform.localScale = new Vector3(1.12f, 0.30f, 0.18f);
+            StripCollider(seal);
+            seal.GetComponent<Renderer>().sharedMaterial = prize
+                ? MaterialFor("Objective_SealPrize", new Color(1f, 0.28f, 0.34f),
                     "Universal Render Pipeline/Unlit")
-                : MaterialFor("Objective_Gold", new Color(1f, 0.82f, 0.25f),
+                : MaterialFor("Objective_Seal", new Color(0.80f, 0.52f, 0.10f),
                     "Universal Render Pipeline/Unlit");
+
+            // 바닥에 떨어지는 빛무리. 어디에 있는지 멀리서도 눈에 띈다.
+            var pool = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            pool.name = "LightPool";
+            pool.transform.SetParent(objective.transform, false);
+            pool.transform.localPosition = new Vector3(0f, 0.03f, 0f);
+            float poolSize = prize ? 2.6f : 1.5f;
+            pool.transform.localScale = new Vector3(poolSize, 0.01f, poolSize);
+            StripCollider(pool);
+            pool.GetComponent<Renderer>().sharedMaterial = MaterialFor(
+                prize ? "Objective_PoolPrize" : "Objective_Pool",
+                new Color(coreColor.r, coreColor.g, coreColor.b, prize ? 0.22f : 0.16f),
+                "Stealth/FOVCone");
 
             // 고액 자료는 멀리서도 보이도록 스스로 빛난다. 중앙까지 갈 이유가 눈에 보여야 한다.
             if (prize)
@@ -982,6 +1486,50 @@ namespace Stealth.EditorTools
 
             var mat = MaterialFor("Exit_Zone", new Color(0.35f, 1f, 0.6f, 0.35f), "Stealth/FOVCone");
             disc.GetComponent<Renderer>().sharedMaterial = mat;
+
+            // 이 아래는 전부 장식이다. ExitZone 은 disc 의 색만 바꾸므로 나머지는 건드리지 않는다.
+            Material frame = MaterialFor("Exit_Frame", new Color(0.35f, 1f, 0.6f),
+                "Universal Render Pipeline/Unlit");
+            Material post = MaterialFor("Exit_Post", new Color(0.18f, 0.22f, 0.26f));
+
+            // 네 귀퉁이 기둥 + 꼭대기 등. "여기가 출구"라고 멀리서도 알려주는 이정표.
+            for (int i = 0; i < 4; i++)
+            {
+                float angle = 45f + i * 90f;
+                Vector3 dir = Quaternion.Euler(0f, angle, 0f) * Vector3.forward;
+
+                var pillar = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                pillar.name = $"Post {i + 1}";
+                pillar.transform.SetParent(exit.transform, false);
+                pillar.transform.localPosition = dir * 1.9f + Vector3.up * 0.6f;
+                pillar.transform.localScale = new Vector3(0.16f, 0.6f, 0.16f);
+                StripCollider(pillar);
+                pillar.GetComponent<Renderer>().sharedMaterial = post;
+
+                var bulb = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                bulb.name = $"Lamp {i + 1}";
+                bulb.transform.SetParent(exit.transform, false);
+                bulb.transform.localPosition = dir * 1.9f + Vector3.up * 1.28f;
+                bulb.transform.localScale = Vector3.one * 0.22f;
+                StripCollider(bulb);
+                bulb.GetComponent<Renderer>().sharedMaterial = frame;
+            }
+
+            // 바닥 화살표 네 개 — 안쪽을 가리켜 "여기로 들어와라"를 만든다.
+            for (int i = 0; i < 4; i++)
+            {
+                float angle = i * 90f;
+                Vector3 dir = Quaternion.Euler(0f, angle, 0f) * Vector3.forward;
+
+                var arrow = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                arrow.name = $"Arrow {i + 1}";
+                arrow.transform.SetParent(exit.transform, false);
+                arrow.transform.localPosition = dir * 1.35f + Vector3.up * 0.06f;
+                arrow.transform.localRotation = Quaternion.Euler(0f, angle + 45f, 0f);
+                arrow.transform.localScale = new Vector3(0.5f, 0.02f, 0.5f);
+                StripCollider(arrow);
+                arrow.GetComponent<Renderer>().sharedMaterial = frame;
+            }
 
             var zone = exit.AddComponent<ExitZone>();
             zone.radius = 2.2f;
