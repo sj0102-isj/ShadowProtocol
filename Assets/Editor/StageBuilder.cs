@@ -1,10 +1,13 @@
 using System.Collections.Generic;
-using Unity.AI.Navigation;
-using UnityEditor;
+using Unity.AI.Navigation;          // NavMeshSurface — 런타임/에디터에서 NavMesh 굽기
+using UnityEditor;                  // MenuItem, EditorSceneManager 등 에디터 전용 기능
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.AI;
 
+// ★ 이 파일은 Assets/Editor/ 폴더 안에 있다. 유니티는 이 폴더의 스크립트를
+//   "에디터 전용"으로 취급해서 게임 빌드에 포함하지 않는다.
+//   using UnityEditor; 를 쓰는 코드는 반드시 이 폴더에 있어야 빌드가 깨지지 않는다.
 namespace Stealth.EditorTools
 {
     /// <summary>
@@ -26,10 +29,20 @@ namespace Stealth.EditorTools
     ///
     /// 공중 순찰 드론은 격자에 찍지 않고 StageData.droneRoutes 로 따로 준다. 벽을 무시하기 때문이다.
     /// </summary>
+    //
+    // ── 이 도구가 하는 일 ──
+    // 문자열 배열(맵 그림)을 읽어서 씬에 벽·바닥·경비·자료를 전부 코드로 만들어 놓는다.
+    // 손으로 오브젝트를 배치하지 않기 때문에
+    //   - 맵을 고치려면 문자 한 글자만 바꾸면 되고
+    //   - 공용 규칙(벽 높이, 경비 설정)을 바꾸면 전 스테이지에 한 번에 반영되고
+    //   - 씬 파일이 깨져도 메뉴 한 번이면 복구된다.
+    //
+    // 대신 씬을 손으로 꾸민 내용은 다시 만들 때 전부 지워진다. 그래서 데모 씬처럼
+    // 손을 댄 것은 별도 파일로 저장해야 한다.
     public static class StageBuilder
     {
-        const string RootName = "--- STAGE ---";
-        const float Cell = 2f;
+        const string RootName = "--- STAGE ---";   // 생성물을 전부 담는 최상위 오브젝트 이름
+        const float Cell = 2f;                     // 격자 한 칸의 실제 크기(m)
         const float WallHeight = 2.6f;
         const float ShelfHeight = 2.0f;
 
@@ -61,6 +74,11 @@ namespace Stealth.EditorTools
         /// 메뉴를 하나씩 누르는 것보다 이게 기본 동작이다.
         /// 스테이지 1을 마지막에 만들어 그 씬이 열린 채로 끝난다.
         /// </summary>
+        // [MenuItem] 을 붙이면 유니티 상단 메뉴에 항목이 생긴다.
+        //   "Stealth/Build ALL Stages"  →  Stealth 메뉴 안의 항목 이름
+        //   %#a                         →  단축키. % = Ctrl, # = Shift, & = Alt
+        //                                  즉 Ctrl+Shift+A
+        //   priority = 0                →  메뉴에서 위로 올린다
         [MenuItem("Stealth/Build ALL Stages %#a", priority = 0)]
         public static void BuildAll()
         {
@@ -127,19 +145,30 @@ namespace Stealth.EditorTools
 
         // ------------------------------------------------------------ 빌드
 
+        /// <summary>
+        /// 스테이지 하나를 통째로 만든다. 이 파일에서 가장 중요한 함수.
+        ///
+        /// 순서에 의미가 있다:
+        ///   1. 지오메트리(벽·바닥) 생성  →  NavMesh 굽기
+        ///   2. 그 다음에 경비·자료 생성 — 먼저 만들면 사람이 벽으로 구워져 길이 막힌다
+        ///   3. 마지막에 시스템·카메라·조명
+        /// </summary>
         public static bool Build(StageData stage)
         {
             if (!OpenOrCreateScene(stage.sceneName)) return false;
 
             var scene = EditorSceneManager.GetActiveScene();
 
+            // 이전에 만든 것을 먼저 지운다. 안 지우면 생성할 때마다 벽이 겹쳐 쌓인다.
+            // DestroyImmediate 는 에디터에서 즉시 지우는 함수다(게임 중에는 Destroy 를 쓴다).
             var existing = GameObject.Find(RootName);
             if (existing != null) Object.DestroyImmediate(existing);
 
             var root = new GameObject(RootName);
 
-            ValidateGrid(stage);
+            ValidateGrid(stage);   // 줄 길이가 다르거나 P/E 가 없으면 여기서 경고를 띄운다
 
+            // grid 는 문자열 배열이다. 한 줄의 글자 수가 가로, 줄 수가 세로가 된다.
             int width = stage.grid[0].Length;
             int height = stage.grid.Length;
 
@@ -152,8 +181,10 @@ namespace Stealth.EditorTools
             BuildCrawlLintels(geometry.transform, stage, width, height);
             BuildHideProps(geometry.transform, stage, width, height);
 
+            // NavMesh = 경비가 걸어다닐 수 있는 영역을 미리 계산해 둔 그물망.
+            // 이걸 구워두면 GuardAI 가 SetDestination 한 줄로 벽을 피해 길을 찾는다.
             var surface = geometry.AddComponent<NavMeshSurface>();
-            surface.collectObjects = CollectObjects.Children;
+            surface.collectObjects = CollectObjects.Children;   // 이 오브젝트의 자식만 대상으로
             surface.useGeometry = NavMeshCollectGeometry.RenderMeshes;
             BakeNavMesh(surface);
 
@@ -247,6 +278,13 @@ namespace Stealth.EditorTools
         /// 같은 문자가 가로로 이어지면 하나의 박스로 합친다.
         /// 오브젝트 수가 줄고 씬 하이어라키가 읽기 쉬워진다.
         /// </summary>
+        /// <summary>
+        /// 벽(#)과 선반(X)을 만든다.
+        ///
+        /// 칸마다 큐브를 하나씩 놓지 않고, 가로로 이어진 같은 문자를 한 덩어리로 묶어
+        /// 긴 큐브 하나로 만든다(런 렝스 압축). 47칸짜리 벽이 큐브 47개가 아니라 1개가 되므로
+        /// 오브젝트 수가 크게 줄고 렌더링도 빨라진다.
+        /// </summary>
         static void BuildBlocks(Transform parent, StageData stage, int width, int height)
         {
             var wallParent = new GameObject("Walls").transform;
@@ -268,13 +306,16 @@ namespace Stealth.EditorTools
                     char c = stage.grid[y][x];
                     if (c != '#' && c != 'X') { x++; continue; }
 
+                    // 같은 문자가 몇 칸이나 이어지는지 센다.
                     int runStart = x;
                     while (x < width && stage.grid[y][x] == c) x++;
-                    int runEnd = x - 1;
+                    int runEnd = x - 1;   // while 이 한 칸 더 갔으므로 하나 뺀다
 
                     bool isWall = c == '#';
                     float h = isWall ? WallHeight : ShelfHeight;
-                    float length = (runEnd - runStart + 1) * Cell;
+                    float length = (runEnd - runStart + 1) * Cell;   // 이어진 칸 수 × 칸 크기
+
+                    // 덩어리의 한가운데 좌표. 시작과 끝의 평균을 GridToWorld 와 같은 식으로 변환한다.
                     float centerX = ((runStart + runEnd) * 0.5f - (width - 1) * 0.5f) * Cell;
                     float centerZ = ((height - 1) * 0.5f - y) * Cell;
 
@@ -464,8 +505,13 @@ namespace Stealth.EditorTools
                 for (int x = 0; x < width; x++)
                 {
                     char c = stage.grid[y][x];
+
+                    // 문자는 내부적으로 숫자다. '1'~'9' 사이인지 이렇게 비교할 수 있다.
                     if (c < '1' || c > '9') continue;
 
+                    // Dictionary = "열쇠 → 값" 표. 여기서는 숫자 문자 → 그 숫자가 찍힌 칸 목록.
+                    // TryGetValue 는 있으면 꺼내고 없으면 false 를 돌려준다.
+                    // 없을 때만 새 목록을 만들어 넣는다.
                     if (!pairs.TryGetValue(c, out List<Vector2Int> list))
                     {
                         list = new List<Vector2Int>();
@@ -601,6 +647,17 @@ namespace Stealth.EditorTools
 
         // ------------------------------------------------------------ 액터
 
+        /// <summary>
+        /// 플레이어를 만든다. 프리팹을 쓰지 않고 코드로 조립하는 이유는
+        /// 스테이지마다 동전 던지기 유무가 달라지고, 프리팹을 고치면 전 스테이지를
+        /// 다시 열어 확인해야 하는데 이 방식은 메뉴 한 번이면 전부 반영되기 때문이다.
+        ///
+        /// 구조:
+        ///   Player                  ← CharacterController + PlayerController
+        ///    ├ Body                 ← 보이는 캡슐 (콜라이더 제거)
+        ///    ├ FacingMarker         ← 바라보는 방향을 알려주는 코
+        ///    └ BlackoutLight        ← 정전 중에만 켜지는 조명
+        /// </summary>
         static void BuildPlayer(Transform parent, Vector3 position, bool allowCoin)
         {
             var player = new GameObject("Player");
@@ -645,10 +702,13 @@ namespace Stealth.EditorTools
             pointLight.shadows = LightShadows.None;
             pointLight.enabled = false;
 
+            // 컴포넌트를 붙이고 인스펙터에서 꽂아줄 참조를 코드로 연결한다.
+            // 씬을 다시 만들어도 연결이 끊기지 않는 것이 이 방식의 장점이다.
             var controller = player.AddComponent<PlayerController>();
             controller.body = body.transform;
             controller.facingMarker = nose.transform;
 
+            // 기능은 스테이지마다 하나씩 열린다. 동전은 2스테이지부터.
             if (allowCoin) BuildCoinThrow(player, parent);
         }
 
@@ -928,6 +988,12 @@ namespace Stealth.EditorTools
             zone.zoneRenderer = disc.GetComponent<Renderer>();
         }
 
+        /// <summary>
+        /// 눈에 보이지 않는 관리 컴포넌트들을 한 오브젝트에 모아 붙인다.
+        /// 게임 매니저·메뉴·HUD·정전·무한모드가 전부 여기 들어간다.
+        /// 한곳에 모아두면 하이어라키에서 "Systems" 하나만 보면 되고,
+        /// 씬을 다시 만들 때 빠진 것이 없는지 확인하기도 쉽다.
+        /// </summary>
         static void BuildSystems(Transform parent, StageData stage, List<Vector3> walkable)
         {
             var systems = new GameObject("Systems");
@@ -947,13 +1013,22 @@ namespace Stealth.EditorTools
             if (playerController != null)
                 blackout.playerLight = playerController.GetComponentInChildren<Light>(true);
 
+            // 무한모드 전용 컴포넌트는 무한모드에만 붙인다.
             if (!stage.endless) return;
 
             var endless = systems.AddComponent<EndlessMode>();
+
+            // new List<Vector3>(walkable) 는 복사본을 만든다. 같은 목록을 그대로 넘기면
+            // 한쪽에서 고쳤을 때 다른 쪽도 함께 바뀌는 사고가 난다.
             endless.spawnPoints = new List<Vector3>(walkable);
         }
 
         /// <summary>자료가 리스폰될 수 있는 칸. 벽·선반·오크통·크롤 통로는 제외한다.</summary>
+        /// <summary>
+        /// 걸어 다닐 수 있는 칸들의 월드 좌표 목록.
+        /// 무한모드에서 자료를 되살릴 자리를 고를 때 이 목록에서 뽑는다.
+        /// 은신처(h)와 크롤 통로(c)는 제외한다 — 소품이나 상인방이 있어 자료를 놓기 부적절하다.
+        /// </summary>
         static List<Vector3> CollectWalkableCells(StageData stage, int width, int height)
         {
             var cells = new List<Vector3>();
@@ -990,10 +1065,16 @@ namespace Stealth.EditorTools
                 float bestScore = float.MinValue;
 
                 // 무작위 후보 중 가장 한적한 자리를 고른다.
+                //
+                // 후보를 80번 뽑아서 점수가 제일 높은 것을 쓰는 방식이다. 모든 칸을 다 검사하는
+                // 것보다 훨씬 빠르면서, 결과는 거의 차이가 없다. 이런 걸 표본 추출이라고 한다.
                 for (int attempt = 0; attempt < 80; attempt++)
                 {
                     Vector3 candidate = candidates[Random.Range(0, candidates.Count)];
 
+                    // 점수 = 플레이어에게서 떨어진 정도 + 이미 놓은 자료들에게서 떨어진 정도.
+                    // Mathf.Min 으로 상한을 두는 것이 중요하다. 상한이 없으면 "한 곳에서 아주 멀면
+                    // 다른 것들과 붙어 있어도 총점이 높은" 결과가 나와 구석에 몰린다.
                     float score = Mathf.Min(idealFromPlayer, Vector3.Distance(candidate, playerSpawn));
                     foreach (Vector3 taken in picked)
                         score += Mathf.Min(idealApart, Vector3.Distance(candidate, taken));
@@ -1109,6 +1190,11 @@ namespace Stealth.EditorTools
 
         // ------------------------------------------------------------ 유틸
 
+        /// <summary>
+        /// 격자가 직사각형인지 검사한다.
+        /// 줄 하나의 길이가 어긋나면 벽이 엉뚱한 자리에 생기는데, 원인을 눈으로 찾기가 아주 어렵다.
+        /// 생성 전에 미리 알려주는 것이 훨씬 싸다.
+        /// </summary>
         static void ValidateGrid(StageData stage)
         {
             int width = stage.grid[0].Length;
@@ -1122,6 +1208,14 @@ namespace Stealth.EditorTools
             }
         }
 
+        /// <summary>
+        /// 격자 좌표(x, y) → 월드 좌표.
+        ///
+        ///   x: 가운데를 0으로 맞추기 위해 (전체너비-1)/2 를 뺀 뒤 칸 크기를 곱한다.
+        ///      맵이 원점을 중심으로 놓여야 카메라·조명 설정이 스테이지마다 달라지지 않는다.
+        ///   z: 격자의 y 는 아래(남쪽)로 갈수록 커지는데 월드의 z 는 위(북쪽)로 갈수록 커진다.
+        ///      부호가 반대라서 빼는 순서를 뒤집었다.
+        /// </summary>
         static Vector3 GridToWorld(int x, int y, int width, int height)
         {
             return new Vector3(
@@ -1155,12 +1249,26 @@ namespace Stealth.EditorTools
             return box;
         }
 
+        /// <summary>
+        /// 콜라이더를 떼어낸다.
+        ///
+        /// CreatePrimitive 로 만든 큐브·구에는 콜라이더가 자동으로 붙는다.
+        /// 장식용 오브젝트(경비의 코, 상태 표시등, 시야 콘)에 콜라이더가 남아 있으면
+        /// 레이캐스트에 걸려서 "경비의 코 때문에 시야가 잘리는" 식의 버그가 생긴다.
+        /// </summary>
         static void StripCollider(GameObject go)
         {
             var col = go.GetComponent<Collider>();
             if (col != null) Object.DestroyImmediate(col);
         }
 
+        /// <summary>
+        /// 이름으로 머티리얼 에셋을 찾아 쓰고, 없으면 만들어서 저장한다.
+        ///
+        /// new Material(...) 로 즉석에서 만들면 씬을 저장할 때마다 머티리얼이 씬 안에 박제되어
+        /// 같은 회색 벽이 스테이지마다 다른 머티리얼이 된다. 에셋으로 저장해 두면
+        /// 여섯 스테이지가 같은 머티리얼 하나를 공유하고, 색을 바꾸면 전부 한 번에 바뀐다.
+        /// </summary>
         static Material MaterialFor(string name, Color color,
             string shaderName = "Universal Render Pipeline/Lit")
         {
@@ -1168,6 +1276,8 @@ namespace Stealth.EditorTools
             if (!AssetDatabase.IsValidFolder(dir)) AssetDatabase.CreateFolder("Assets", "Materials");
 
             string path = $"{dir}/{name}.mat";
+
+            // LoadAssetAtPath = 그 경로의 에셋을 읽는다. 없으면 null.
             var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
 
             if (mat == null)
@@ -1219,12 +1329,26 @@ namespace Stealth.EditorTools
         }
     }
 
+    /// <summary>스테이지 하나를 만드는 데 필요한 모든 정보.</summary>
+    //
+    // StageEntry(StageCatalog) 와 헷갈리기 쉬운데 역할이 다르다.
+    //   StageEntry : 게임이 실행 중에 보는 정보 — 제목, 해금 여부. 빌드에 포함된다
+    //   StageData  : 맵을 만들 때만 쓰는 설계도 — 격자, 경비 경로. 에디터 전용이다
     public class StageData
     {
         public string displayName;
         /// <summary>이 스테이지가 저장될 씬 이름. StageCatalog 의 sceneName 과 일치해야 한다.</summary>
         public string sceneName;
+
+        /// <summary>맵 그림. 한 줄이 가로 한 줄이고, 글자 하나가 한 칸이다.</summary>
         public string[] grid;
+
+        /// <summary>
+        /// 경비들의 순찰 경로. 바깥 배열이 경비 한 명, 안쪽 배열이 그 경비가 도는 지점들이다.
+        /// Vector2Int[][] 처럼 대괄호가 두 겹이면 "배열의 배열"이라는 뜻이다.
+        ///   guardRoutes[0] = 1번 경비의 경로
+        ///   guardRoutes[0][1] = 1번 경비의 두 번째 순찰 지점
+        /// </summary>
         public Vector2Int[][] guardRoutes;
 
         /// <summary>공중 순찰 드론의 경로. 벽을 무시하므로 격자 위 아무 칸이나 찍어도 된다.</summary>
