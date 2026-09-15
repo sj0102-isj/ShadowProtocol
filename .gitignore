@@ -42,3 +42,9 @@ crashlytics-build.properties
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 내가 읽으려고 쓰는 문서. 깃허브에 올리지 않는다.
+1_프로젝트_개요.md
+2_작업기록.md
+3_포트폴리오용_정리.md
+데모파일.md
