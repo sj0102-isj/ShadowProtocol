@@ -1,23 +1,31 @@
 namespace Stealth
 {
     /// <summary>씬을 넘나들며 유지되는 아주 작은 세션 상태.</summary>
+    //
+    // static 변수는 씬을 바꿔도 값이 유지된다. MonoBehaviour 의 필드였다면 씬을 새로 로드하는
+    // 순간 오브젝트와 함께 사라진다. "씬을 넘어 살아남아야 하는 값"에 static 을 쓰는 이유다.
     public static class GameSession
     {
         /// <summary>재시작·스테이지 선택으로 씬을 다시 열 때 타이틀 화면을 건너뛴다.</summary>
         public static bool SkipTitle;
     }
 
+    /// <summary>스테이지 하나의 정보를 담는 묶음.</summary>
+    //
+    // struct(구조체) = class 와 비슷하지만 "값"으로 다뤄진다. 변수에 넣으면 복사본이 만들어진다.
+    // 여기서는 데이터 몇 개를 묶어두는 용도라 struct 가 알맞다.
+    // 동작(메서드)이 붙고 여러 곳에서 같은 것을 공유해야 하면 class 를 쓴다.
     public struct StageEntry
     {
-        public string sceneName;
-        public string code;
-        public string title;
+        public string sceneName;   // 실제 .unity 파일 이름. SceneManager.LoadScene 에 넘긴다
+        public string code;        // 화면에 표시할 번호 (STAGE 01)
+        public string title;       // 화면에 표시할 이름 (창고)
         /// <summary>이 스테이지에서 처음 등장하는 기능. 선택 화면에 표시된다.</summary>
         public string newFeature;
         public string summary;
         /// <summary>씬이 실제로 만들어져 있는가. 아직 안 만든 스테이지는 false.</summary>
         public bool built;
-        public bool isEndless;
+        public bool isEndless;     // 무한모드인가. 탈출 조건이 없고 목숨제로 돌아간다
     }
 
     /// <summary>
@@ -26,8 +34,14 @@ namespace Stealth
     ///
     /// 새 스테이지를 만들면 built 를 true 로 바꾸면 선택 화면에 뜬다.
     /// </summary>
+    //
+    // 스테이지 정보를 씬마다 흩어 두지 않고 여기 한 곳에 모아 둔 이유는,
+    // 선택 화면·해금 판정·씬 로드가 전부 이 목록 하나만 보면 되게 하기 위해서다.
+    // 스테이지를 추가할 때 고칠 곳이 이 파일 하나뿐이다.
     public static class StageCatalog
     {
+        // readonly 배열 + 객체 초기화자. { new StageEntry { ... }, ... } 형태로
+        // 필드 이름을 적어가며 채우면 순서를 안 외워도 되고 읽기도 쉽다.
         public static readonly StageEntry[] Stages =
         {
             new StageEntry
@@ -91,6 +105,9 @@ namespace Stealth
         public static bool IsSelectable(StageEntry stage)
         {
             if (!stage.built) return false;
+
+            // 일반 스테이지는 항상 고를 수 있고, 무한모드만 해금 조건을 본다.
+            // "무한모드가 아니거나, 무한모드가 해금됐으면 true" 라는 뜻이다.
             return !stage.isEndless || StageProgress.EndlessUnlocked;
         }
     }

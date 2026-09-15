@@ -1,16 +1,31 @@
-using System.Collections.Generic;
+using System.Collections.Generic;   // List<T>
 using UnityEngine;
-using UnityEngine.AI;
+using UnityEngine.AI;               // NavMeshAgent — 길찾기
 
 namespace Stealth
 {
     /// <summary>
     /// 경비 AI 상태머신. 시야/소음 입력을 받아 상태를 전이하고 NavMesh로 움직인다.
     /// </summary>
+    //
+    // ── 이 파일을 읽는 순서 ──
+    //   1) Update()        : 매 프레임 무엇을 하는지의 큰 그림
+    //   2) UpdateAwareness(): 경계 게이지가 어떻게 차고 빠지는지
+    //   3) TickState()     : 상태별로 갈라지는 지점
+    //   4) Tick***()       : 상태 하나하나의 행동
+    //   5) Enter***()      : 상태를 바꾸는 순간에만 하는 일
+    //
+    // 상태머신이란: "지금 어떤 상태인지"를 변수 하나(State)에 담아두고, 매 프레임 그 상태에
+    // 맞는 함수만 실행하는 방식. if 문이 뒤엉키는 것을 막아준다.
+    //   Patrol(순찰) → Suspicious(의심) → Search(수색) → Return(복귀) → Patrol
+    //                                  ↘ Chase(발각)
     [RequireComponent(typeof(NavMeshAgent))]
     [RequireComponent(typeof(GuardVision))]
     public class GuardAI : MonoBehaviour
     {
+        // static = 클래스 전체가 공유하는 값. 경비가 몇 명이든 이 리스트는 하나뿐이다.
+        // 각 경비가 OnEnable 에서 자기를 넣고 OnDisable 에서 뺀다. 그래서 "지금 씬에 있는
+        // 모든 경비"를 FindObjectsByType 같은 느린 검색 없이 즉시 얻을 수 있다.
         public static readonly List<GuardAI> All = new List<GuardAI>();
 
         /// <summary>
@@ -20,9 +35,13 @@ namespace Stealth
         /// </summary>
         static NavMeshPath pathBuffer;
 
+        // ============================================================
+        //  인스펙터 설정값
+        // ============================================================
+
         [Header("Patrol")]
-        public Transform[] waypoints;
-        public float patrolSpeed = 2.2f;
+        public Transform[] waypoints;       // 순찰 지점들. StageBuilder 가 만들어 꽂아준다
+        public float patrolSpeed = 2.2f;    // 순찰 이동 속도(m/s)
         [Tooltip("순찰 지점 도착 후, 고개를 돌리기 전에 가만히 서 있는 시간.")]
         public float arrivePause = 1.2f;
         [Tooltip("좌/우를 확인할 때 그 방향을 바라본 채 머무는 시간.")]
@@ -39,9 +58,9 @@ namespace Stealth
         [Header("Search")]
         [Tooltip("의심한 뒤 확인하러 출발하기까지 멈춰 서 있는 시간.")]
         public float suspicionPause = 1.6f;
-        public float searchSpeed = 3.4f;
-        public float searchDuration = 8f;
-        public float searchRadius = 5f;
+        public float searchSpeed = 3.4f;    // 수색 중에는 순찰보다 빠르게 움직인다
+        public float searchDuration = 8f;   // 이 시간이 지나면 포기하고 순찰로 돌아간다
+        public float searchRadius = 5f;     // 관심 지점 주변 이 반경 안을 헤맨다
 
         [Header("Detection (쉬운 난이도 기준)")]
         [Tooltip("시야 끝에서 경계가 차오르는 속도 (초당).")]
@@ -52,73 +71,107 @@ namespace Stealth
         public float decayRate = 0.5f;
         [Tooltip("시야를 벗어난 뒤 경계가 줄기 시작하기까지의 유예.")]
         public float decayDelay = 0.8f;
-        [Range(0f, 1f)] public float suspiciousThreshold = 0.35f;
+        [Range(0f, 1f)] public float suspiciousThreshold = 0.35f;   // 이만큼 차면 의심 상태로
 
         [Header("Hearing")]
-        public float hearingMultiplier = 1f;
+        public float hearingMultiplier = 1f;   // 경비별 청력 차이를 주고 싶을 때 쓰는 배수
         [Tooltip("던진 동전 앞에서 두리번거리는 시간(초).")]
         public float coinInspectSeconds = 2.5f;
 
         [Header("Indicator")]
-        public Transform indicator;
+        public Transform indicator;   // 머리 위 상태 표시 큐브
 
+        // ============================================================
+        //  바깥에서 읽는 상태값
+        // ============================================================
+
+        /// <summary>지금 어떤 상태인가. = GuardState.Patrol 은 초기값 지정이다.</summary>
         public GuardState State { get; private set; } = GuardState.Patrol;
+
+        /// <summary>경계 게이지 0~1. 1이 되면 발각.</summary>
         public float Awareness { get; private set; }
+
+        /// <summary>이번 프레임에 플레이어가 보이는가.</summary>
         public bool SeesPlayer { get; private set; }
 
-        NavMeshAgent agent;
-        GuardVision vision;
-        PlayerController player;
-        Renderer indicatorRenderer;
-        MaterialPropertyBlock mpb;
+        // ============================================================
+        //  내부 변수
+        // ============================================================
 
-        int waypointIndex;
-        int scanStep;
-        float scanTimer;
-        float stateTimer;
-        float waitTimer;
-        bool wasFrozen;
-        Coin targetCoin;
-        float coinDwellTimer;
-        float decayTimer;
-        Vector3 pointOfInterest;
-        Vector3 lastKnownPlayerPos;
-        Quaternion lookTarget;
+        NavMeshAgent agent;             // 길찾기 부품. 목적지만 주면 알아서 벽을 피해 걸어간다
+        GuardVision vision;             // 시야 판정 + 콘 그리기 부품
+        PlayerController player;        // 감시 대상
+        Renderer indicatorRenderer;     // 머리 위 큐브의 렌더러
+        MaterialPropertyBlock mpb;      // 머티리얼을 복제하지 않고 색만 바꾸는 도구
+
+        int waypointIndex;              // 지금 향하는 순찰 지점 번호
+        int scanStep;                   // 도착 후 두리번거리기 단계 (0정지 1좌 2우 3정면)
+        float scanTimer;                // 그 단계에서 머문 시간
+        float stateTimer;               // 현재 상태가 된 뒤 흐른 시간
+        float waitTimer;                // 수색 중 다음 지점으로 옮기기까지의 대기
+        bool wasFrozen;                 // 지난 프레임에 멈춰 있었는가 (메뉴/연출 중)
+        Coin targetCoin;                // 주우러 가는 동전. null 이면 없음
+        float coinDwellTimer;           // 동전 앞에서 머문 시간
+        float decayTimer;               // 경계가 줄기 시작하기까지 남은 유예
+        Vector3 pointOfInterest;        // 확인하러 갈 지점
+        Vector3 lastKnownPlayerPos;     // 마지막으로 본 플레이어 위치
+        Quaternion lookTarget;          // 바라보고 싶은 방향. UpdateRotation 이 여기로 서서히 돌린다
 
         /// <summary>제자리에서 두리번거릴 때의 기준 각도. 도착 시점에 한 번만 고정한다.</summary>
         float lookBaseYaw;
-        bool lookBaseSet;
-        bool hasDestination;
+        bool lookBaseSet;               // 기준 각도를 이미 잡았는가
+        bool hasDestination;            // 목적지를 한 번이라도 준 적이 있는가
 
+        // 셰이더 변수 이름을 숫자 ID로 바꿔 저장해 둔다.
+        // SetColor("_BaseColor") 처럼 문자열로 부르면 매번 이름을 해싱해야 해서 느리다.
         static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+
+        // ============================================================
+        //  유니티 생명주기
+        // ============================================================
 
         void Awake()
         {
             agent = GetComponent<NavMeshAgent>();
             vision = GetComponent<GuardVision>();
+
+            // NavMeshAgent 가 회전까지 맡으면 두리번거리기를 우리가 제어할 수 없다.
+            // 회전은 직접 UpdateRotation() 에서 처리한다.
             agent.updateRotation = false;
+
             agent.speed = patrolSpeed;
-            agent.stoppingDistance = 0.15f;
+            agent.stoppingDistance = 0.15f;   // 목적지에서 이만큼 남으면 도착으로 친다
             lookTarget = transform.rotation;
             mpb = new MaterialPropertyBlock();
             if (indicator != null) indicatorRenderer = indicator.GetComponent<Renderer>();
         }
 
+        /// <summary>
+        /// OnEnable / OnDisable — 오브젝트가 켜질 때 / 꺼질 때.
+        /// 명단(All)에 등록·해제하고, 소음 알림을 구독·해지한다.
+        /// 등록과 해제를 짝으로 두는 것이 중요하다. 해제를 빠뜨리면 사라진 경비가
+        /// 명단에 남아 null 참조 오류가 난다.
+        /// </summary>
         void OnEnable()
         {
             All.Add(this);
+
+            // += 는 이벤트 구독. "소리가 나면 내 HandleNoise 함수를 불러달라"는 뜻이다.
+            // 소리를 내는 쪽(NoiseSystem)은 누가 듣는지 몰라도 되고, 듣는 쪽은 스스로 등록만 하면 된다.
             NoiseSystem.OnNoise += HandleNoise;
         }
 
         void OnDisable()
         {
             All.Remove(this);
-            NoiseSystem.OnNoise -= HandleNoise;
+            NoiseSystem.OnNoise -= HandleNoise;   // -= 는 구독 해지
         }
 
+        /// <summary>Start — 모든 오브젝트의 Awake 가 끝난 뒤 한 번. 남을 찾을 때는 여기서 한다.</summary>
         void Start()
         {
             player = Object.FindFirstObjectByType<PlayerController>();
+
             if (waypoints != null && waypoints.Length > 0 && waypoints[0] != null)
                 GoTo(waypoints[0].position, patrolSpeed);
         }
@@ -126,6 +179,8 @@ namespace Stealth
         void Update()
         {
             var gm = StealthGameManager.Instance;
+
+            // 메뉴 화면이거나 붙잡힘 연출 중이면 경비도 멈춰야 한다.
             bool frozen = gm != null && (gm.State != MissionState.Playing || gm.CaptureSequenceActive);
 
             if (frozen)
@@ -138,6 +193,7 @@ namespace Stealth
                 return;
             }
 
+            // 멈춰 있다가 막 풀린 프레임. 다시 걷게 해준다.
             if (wasFrozen)
             {
                 wasFrozen = false;
@@ -147,45 +203,56 @@ namespace Stealth
             // 동전을 줍는 동안은 고개를 숙이고 있는 것으로 본다.
             vision.Blinded = InspectingCoin;
 
-            UpdateAwareness();
-            TickState();
-            UpdateRotation();
-            UpdateIndicator();
-            vision.SetStateColor(State, Awareness);
+            // 매 프레임 이 다섯 가지를 순서대로 한다. 순서에 의미가 있다.
+            UpdateAwareness();   // 1. 보이는가? 경계 게이지 갱신 (상태가 바뀔 수도 있음)
+            TickState();         // 2. 지금 상태에 맞는 행동
+            UpdateRotation();    // 3. 몸 돌리기
+            UpdateIndicator();   // 4. 머리 위 표시
+            vision.SetStateColor(State, Awareness);   // 5. 시야 콘 색
         }
 
         // ---------------------------------------------------------------- 인지
 
+        /// <summary>
+        /// 경계 게이지를 채우거나 뺀다. 즉시 발각이 아니라 게이지로 만든 이유는,
+        /// 스쳐 지나가는 순간에 바로 잡히면 플레이어가 억울하기 때문이다.
+        /// </summary>
         void UpdateAwareness()
         {
+            // out float closeness — CanSee 가 "보이는가"와 "얼마나 가까운가"를 동시에 돌려준다.
             SeesPlayer = vision.CanSee(player, out float closeness);
 
             if (SeesPlayer)
             {
-                decayTimer = decayDelay;
-                lastKnownPlayerPos = player.transform.position;
+                decayTimer = decayDelay;                          // 감소 유예를 다시 채운다
+                lastKnownPlayerPos = player.transform.position;   // 놓쳐도 여기로 찾아온다
 
+                // 이미 한 번 들킨 적이 있으면 경비들이 예민해진다.
                 float alertBoost = 1f;
                 if (StealthGameManager.Instance != null)
                     alertBoost += StealthGameManager.Instance.AlertLevel * 0.25f;
 
+                // 초당 차오르는 양 = (기본 + 가까움 보너스) × 플레이어 눈에 띔 정도 × 경계 배수
                 float rate = (baseDetectRate + closeDetectRate * closeness)
                              * player.VisibilityMultiplier
                              * alertBoost;
 
+                // Mathf.Min(1f, ...) 로 1을 넘지 않게 막는다.
                 Awareness = Mathf.Min(1f, Awareness + rate * Time.deltaTime);
 
                 if (Awareness >= 1f && State != GuardState.Chase)
                 {
-                    EnterChase();
+                    EnterChase();       // 게이지가 꽉 찼다 = 발각
                 }
                 else if (Awareness >= suspiciousThreshold && State == GuardState.Patrol)
                 {
-                    EnterSuspicious(player.transform.position);
+                    EnterSuspicious(player.transform.position);   // 절반쯤 찼다 = 의심
                 }
             }
             else
             {
+                // 안 보이면: 먼저 유예 시간을 소모하고, 그다음부터 게이지가 줄어든다.
+                // 유예가 없으면 기둥 뒤로 1초만 숨어도 게이지가 바로 빠져서 긴장감이 사라진다.
                 if (decayTimer > 0f) decayTimer -= Time.deltaTime;
                 else Awareness = Mathf.Max(0f, Awareness - decayRate * Time.deltaTime);
             }
@@ -195,17 +262,20 @@ namespace Stealth
         /// 발소리 같은 보통 소음. 들은 경비는 전부 대략적인 방향으로 움직인다.
         /// 동전은 이 경로를 타지 않는다. AlertNearestToCoin 이 한 명만 골라서 직접 보낸다.
         /// </summary>
+        // 이 함수는 OnEnable 에서 NoiseSystem.OnNoise 에 등록해 뒀기 때문에,
+        // 누군가 소리를 내면 유니티가 아니라 NoiseSystem 이 호출해 준다.
         void HandleNoise(Vector3 position, float radius, float strength, Transform source)
         {
-            if (State == GuardState.Chase) return;
-            if (source != null && source.GetComponent<Coin>() != null) return;
+            if (State == GuardState.Chase) return;                            // 이미 발각이면 무의미
+            if (source != null && source.GetComponent<Coin>() != null) return; // 동전은 따로 처리
 
             float distance = Vector3.Distance(transform.position, position);
-            if (distance > radius * hearingMultiplier) return;
+            if (distance > radius * hearingMultiplier) return;   // 너무 멀어서 못 들었다
 
             // 발소리로는 방향만 어렴풋이 안다. 정확한 자리를 집어주면 너무 정확해진다.
+            // insideUnitSphere = 반지름 1인 구 안의 임의의 점. 곱해서 오차 범위를 만든다.
             Vector3 guess = position + Random.insideUnitSphere * 1.5f;
-            guess.y = position.y;
+            guess.y = position.y;   // 위아래 오차는 빼준다. 바닥 위에서만 움직이므로
 
             if (State == GuardState.Patrol || State == GuardState.Return) EnterSearch(guess);
             else if (State == GuardState.Suspicious) pointOfInterest = guess;
@@ -219,13 +289,16 @@ namespace Stealth
         /// "나보다 가까운 애가 없다"고 판단해 따라왔다. 결국 범위 안 전원이 몰려왔다.
         /// 한곳에서 한 번만 정하면 이 순서 문제가 사라진다.
         /// </summary>
+        // static 인 이유: 특정 경비 하나의 일이 아니라 "전체 중에서 한 명을 고르는" 일이다.
+        // 그래서 Coin 이 GuardAI.AlertNearestToCoin(...) 처럼 클래스 이름으로 직접 부른다.
         public static void AlertNearestToCoin(Vector3 position, float radius, Coin coin)
         {
             // 동전이 벽에 끼거나 소품 위에 올라앉았어도 경비가 갈 수 있는 자리로 맞춘다.
+            // SamplePosition = "이 좌표에서 가장 가까운 NavMesh 위의 점"을 찾아준다.
             if (!NavMesh.SamplePosition(position, out NavMeshHit landing, 4f, NavMesh.AllAreas)) return;
 
             GuardAI nearest = null;
-            float best = float.MaxValue;
+            float best = float.MaxValue;   // "아직 아무도 못 찾음"을 뜻하는 초기값
 
             for (int i = 0; i < All.Count; i++)
             {
@@ -235,16 +308,17 @@ namespace Stealth
                 float reach = radius * guard.hearingMultiplier;
 
                 // 걸어가는 거리는 직선 거리보다 항상 길다. 먼저 싸게 거른다.
+                // (직선으로도 멀면 걸어서는 무조건 더 멀다 → 경로 계산을 할 필요조차 없다)
                 if ((guard.transform.position - landing.position).sqrMagnitude > reach * reach) continue;
 
                 float walk = WalkDistance(guard.transform.position, landing.position, reach);
-                if (walk >= best) continue;
+                if (walk >= best) continue;   // 지금까지 찾은 사람보다 멀면 탈락
 
                 nearest = guard;
                 best = walk;
             }
 
-            if (nearest == null) return;
+            if (nearest == null) return;   // 들은 사람이 아무도 없다
 
             nearest.targetCoin = coin;
             nearest.EnterSearch(landing.position);
@@ -260,18 +334,23 @@ namespace Stealth
         /// </summary>
         static float WalkDistance(Vector3 from, Vector3 to, float limit)
         {
+            // ??= 는 "왼쪽이 null 이면 오른쪽을 대입". null 병합 할당 연산자.
             pathBuffer ??= new NavMeshPath();
 
+            // CalculatePath 는 실제로 이동시키지 않고 경로만 계산해 준다.
             if (!NavMesh.CalculatePath(from, to, NavMesh.AllAreas, pathBuffer)) return float.MaxValue;
+
+            // PathComplete 가 아니면 중간에 끊긴 경로다. 갈 수 없다는 뜻.
             if (pathBuffer.status != NavMeshPathStatus.PathComplete) return float.MaxValue;
 
+            // corners = 경로의 꺾이는 점들. 이 점들 사이 거리를 전부 더하면 총 이동 거리다.
             Vector3[] corners = pathBuffer.corners;
             float total = 0f;
 
             for (int i = 1; i < corners.Length; i++)
             {
                 total += Vector3.Distance(corners[i - 1], corners[i]);
-                if (total > limit) return float.MaxValue;
+                if (total > limit) return float.MaxValue;   // 넘는 순간 중단 (조기 종료)
             }
 
             return total;
@@ -285,6 +364,7 @@ namespace Stealth
 
         // ------------------------------------------------------------ 상태머신
 
+        /// <summary>상태에 맞는 함수로 갈라준다. 상태머신의 심장.</summary>
         void TickState()
         {
             stateTimer += Time.deltaTime;
@@ -310,7 +390,7 @@ namespace Stealth
 
             if (!ReachedDestination())
             {
-                scanStep = 0;
+                scanStep = 0;     // 아직 걸어가는 중 — 두리번거리기 단계를 초기화
                 scanTimer = 0f;
                 return;
             }
@@ -320,43 +400,51 @@ namespace Stealth
             if (!lookBaseSet)
             {
                 lookBaseYaw = waypoints[waypointIndex] != null
-                    ? waypoints[waypointIndex].eulerAngles.y
+                    ? waypoints[waypointIndex].eulerAngles.y   // 순찰 지점이 가진 방향을 기준으로
                     : transform.eulerAngles.y;
                 lookBaseSet = true;
             }
 
+            // 단계별로 기준에서 얼마나 틀 것인가
             float offset = scanStep switch
             {
-                1 => -lookAroundAngle,
-                2 => lookAroundAngle,
-                _ => 0f
+                1 => -lookAroundAngle,   // 왼쪽
+                2 => lookAroundAngle,    // 오른쪽
+                _ => 0f                  // 0단계와 3단계는 정면
             };
             lookTarget = Quaternion.Euler(0f, lookBaseYaw + offset, 0f);
 
             // 아직 그 방향을 보고 있지 않다면 대기 시간을 세지 않는다.
+            // 이 한 줄 덕분에 "돌면서 지나간다"가 아니라 "돌고 나서 멈춰 본다"가 된다.
             if (Quaternion.Angle(transform.rotation, lookTarget) > 6f) return;
 
             scanTimer += Time.deltaTime;
 
             float hold = scanStep switch
             {
-                0 => arrivePause,
-                3 => 0.4f,
-                _ => scanHold
+                0 => arrivePause,   // 도착 직후
+                3 => 0.4f,          // 정면 복귀는 짧게
+                _ => scanHold       // 좌우 확인
             };
             if (scanTimer < hold) return;
 
+            // 한 단계 끝 — 다음 단계로
             scanTimer = 0f;
             scanStep++;
 
             if (scanStep <= 3) return;
 
+            // 네 단계를 다 마쳤으면 다음 순찰 지점으로 출발
             scanStep = 0;
+
+            // % 는 나머지 연산. 마지막 지점 다음이 다시 0번이 되어 순환한다.
             waypointIndex = (waypointIndex + 1) % waypoints.Length;
+
             if (waypoints[waypointIndex] != null)
                 GoTo(waypoints[waypointIndex].position, patrolSpeed);
         }
 
+        /// <summary>의심 상태. 멈춰 서서 그쪽을 노려보다가, 시간이 지나면 확인하러 간다.</summary>
         void TickSuspicious()
         {
             if (agent.isOnNavMesh) agent.isStopped = true;
@@ -374,8 +462,10 @@ namespace Stealth
             if (stateTimer > suspicionPause) EnterSearch(pointOfInterest);
         }
 
+        /// <summary>수색 상태. 관심 지점 주변을 임의로 돌아다니며 살핀다.</summary>
         void TickSearch()
         {
+            // 동전을 주우러 가는 중이면 그쪽 로직으로 완전히 갈라진다.
             if (targetCoin != null)
             {
                 // 동전이 못 가는 자리에 떨어지면 ReachedDestination 이 영영 참이 되지 않는다.
@@ -395,21 +485,21 @@ namespace Stealth
             if (ReachedDestination())
             {
                 waitTimer -= Time.deltaTime;
-                LookAround(2f, searchLookAngle);
+                LookAround(2f, searchLookAngle);   // 제자리에서 좌우로 훑는다
 
                 if (waitTimer <= 0f)
                 {
                     waitTimer = 1.2f;
+                    // 주변 임의의 지점으로 옮겨가며 뒤진다
                     GoTo(RandomPointNear(pointOfInterest, searchRadius), searchSpeed);
                 }
             }
 
-            if (stateTimer > searchDuration) EnterReturn();
+            if (stateTimer > searchDuration) EnterReturn();   // 시간이 다 되면 포기
         }
 
         /// <summary>
         /// 던져진 동전을 확인하러 가는 동작. 주우면 잠깐 두리번거린 뒤 순찰로 돌아간다.
-        ///
         /// </summary>
         void TickCoinInvestigation()
         {
@@ -421,6 +511,7 @@ namespace Stealth
 
             // 도착했으면 줍는다. 동전이 이미 사라졌거나 플레이어가 다시 던져서
             // 다른 자리로 날아갔다면 빈손으로 그 자리를 잠시 살핀다.
+            // sqrMagnitude < 4f 는 "거리 2m 이내"와 같은 뜻이다 (2의 제곱이 4).
             if (targetCoin.gameObject.activeSelf &&
                 (targetCoin.transform.position - transform.position).sqrMagnitude < 4f)
             {
@@ -446,6 +537,7 @@ namespace Stealth
             if (agent.isOnNavMesh) agent.isStopped = true;
         }
 
+        /// <summary>복귀 상태. 가장 가까운 순찰 지점까지 걸어가면 순찰로 되돌아간다.</summary>
         void TickReturn()
         {
             if (waypoints == null || waypoints.Length == 0)
@@ -458,6 +550,9 @@ namespace Stealth
         }
 
         // --------------------------------------------------------------- 전이
+        //
+        // Enter*** 함수들은 "상태가 바뀌는 그 순간에 딱 한 번" 해야 할 일을 모아둔 곳이다.
+        // 매 프레임 하는 일(Tick***)과 분리해 두면 흐름을 읽기가 훨씬 쉬워진다.
 
         void EnterSuspicious(Vector3 point)
         {
@@ -473,8 +568,8 @@ namespace Stealth
             var gm = StealthGameManager.Instance;
             if (gm == null) return;
 
-            gm.ReportDetection();
-            gm.Capture();
+            gm.ReportDetection();   // 경계 수치를 올려 다음부터 더 예민해지게
+            gm.Capture();           // 붙잡힘 연출 시작
         }
 
         void EnterSearch(Vector3 point)
@@ -490,6 +585,8 @@ namespace Stealth
             SetState(GuardState.Return);
             if (waypoints != null && waypoints.Length > 0)
             {
+                // 원래 순서의 다음 지점이 아니라 "지금 제일 가까운" 지점으로 돌아간다.
+                // 그래야 수색하다 멀리 온 경비가 맵을 가로질러 되돌아가지 않는다.
                 waypointIndex = NearestWaypointIndex();
                 if (waypoints[waypointIndex] != null)
                     GoTo(waypoints[waypointIndex].position, patrolSpeed);
@@ -520,9 +617,10 @@ namespace Stealth
             if (waypoints[waypointIndex] != null) GoTo(waypoints[waypointIndex].position, patrolSpeed);
         }
 
+        /// <summary>상태를 바꾸는 유일한 통로. 여기를 거치게 하면 타이머 초기화를 빠뜨릴 수 없다.</summary>
         void SetState(GuardState next)
         {
-            if (State == next) return;
+            if (State == next) return;   // 같은 상태면 아무것도 안 한다 (타이머가 계속 0이 되는 것 방지)
             State = next;
             stateTimer = 0f;
             if (agent.isOnNavMesh) agent.isStopped = false;
@@ -546,65 +644,92 @@ namespace Stealth
                 lookBaseSet = true;
             }
 
+            // Mathf.Sin 은 -1과 1 사이를 부드럽게 오간다. 시간을 넣으면 좌우로 흔들리는 값이 된다.
+            // speed 를 곱하면 흔들리는 빠르기, degrees 를 곱하면 흔들리는 폭이 된다.
             lookTarget = Quaternion.Euler(0f, lookBaseYaw + Mathf.Sin(Time.time * speed) * degrees, 0f);
         }
 
+        /// <summary>목적지를 지정한다. 상태가 바뀔 때마다 여기를 거친다.</summary>
         void GoTo(Vector3 destination, float speed)
         {
             // 새 목적지로 움직이기 시작하면 두리번거림의 기준 각도를 버린다.
             // 다음에 도착했을 때 그 자리에서 다시 잡는다.
             lookBaseSet = false;
 
+            // NavMesh 위에 있지 않으면 길찾기 명령이 예외를 던진다. 먼저 막는다.
             if (!agent.isOnNavMesh) return;
 
             agent.speed = speed;
             agent.isStopped = false;
 
+            // 목적지가 길 밖이면 가장 가까운 길 위의 점으로 보정한다.
             if (NavMesh.SamplePosition(destination, out NavMeshHit hit, 4f, NavMesh.AllAreas))
             {
-                agent.SetDestination(hit.position);
+                agent.SetDestination(hit.position);   // 실제 이동 명령은 이 한 줄
                 hasDestination = true;
             }
         }
 
+        /// <summary>목적지에 도착했는가.</summary>
         bool ReachedDestination()
         {
             if (!agent.isOnNavMesh || !hasDestination) return true;
+
+            // pathPending = 경로를 아직 계산 중. 이때 remainingDistance 는 0이라 도착으로 오인된다.
             if (agent.pathPending) return false;
+
+            // +0.35f 여유를 두는 이유: 딱 맞게 재면 미세하게 못 미쳐 영영 도착 판정이 안 나기도 한다.
             return agent.remainingDistance <= agent.stoppingDistance + 0.35f;
         }
 
+        /// <summary>중심에서 반경 안의 임의의 지점. 수색할 때 다음에 뒤질 곳을 고른다.</summary>
         Vector3 RandomPointNear(Vector3 center, float radius)
         {
+            // insideUnitCircle = 반지름 1인 원 안의 임의의 점(2D). 반경을 곱해 크기를 맞춘다.
             Vector2 offset = Random.insideUnitCircle * radius;
+
+            // 2D 원의 y 를 3D 의 z 로 옮긴다. 바닥 평면이 XZ 이기 때문이다.
             Vector3 candidate = center + new Vector3(offset.x, 0f, offset.y);
+
+            // 그 지점이 벽 안이면 갈 수 있는 자리로 보정하고, 그마저 실패하면 중심을 쓴다.
             return NavMesh.SamplePosition(candidate, out NavMeshHit hit, radius, NavMesh.AllAreas)
                 ? hit.position
                 : center;
         }
 
+        /// <summary>지금 위치에서 가장 가까운 순찰 지점의 번호.</summary>
         int NearestWaypointIndex()
         {
             int best = 0;
             float bestDist = float.MaxValue;
+
             for (int i = 0; i < waypoints.Length; i++)
             {
                 if (waypoints[i] == null) continue;
+
+                // 거리 비교만 할 것이므로 제곱근을 생략한 sqrMagnitude 로 충분하다.
                 float d = (waypoints[i].position - transform.position).sqrMagnitude;
                 if (d < bestDist) { bestDist = d; best = i; }
             }
+
             return best;
         }
 
+        /// <summary>
+        /// 몸을 어느 쪽으로 돌릴지 정하고 실제로 돌린다.
+        /// 상황마다 보는 대상이 다르므로 우선순위를 두고 하나를 고른다.
+        /// </summary>
         void UpdateRotation()
         {
-            Quaternion target = lookTarget;
+            Quaternion target = lookTarget;   // 기본값: 상태 로직이 정해둔 방향
             float turnSpeed = 420f;
 
+            // 1순위 — 움직이는 중이면 가는 방향을 본다
             if (agent.isOnNavMesh && !agent.isStopped && agent.velocity.sqrMagnitude > 0.05f)
             {
                 target = Quaternion.LookRotation(agent.velocity.normalized, Vector3.up);
             }
+            // 2순위 — 발각 상태면 플레이어를 가리킨다
             else if (State == GuardState.Chase && player != null)
             {
                 Vector3 dir = player.transform.position - transform.position;
@@ -617,33 +742,43 @@ namespace Stealth
                 turnSpeed = scanTurnSpeed;
             }
 
+            // RotateTowards = 목표 각도로 초당 turnSpeed 도씩 다가간다. 즉시 돌지 않아 자연스럽다.
             transform.rotation = Quaternion.RotateTowards(transform.rotation, target, turnSpeed * Time.deltaTime);
         }
 
+        /// <summary>머리 위 큐브의 색과 크기로 상태를 알려준다.</summary>
         void UpdateIndicator()
         {
             if (indicator == null) return;
 
             Color c = State switch
             {
-                GuardState.Chase => new Color(1f, 0.2f, 0.2f),
-                GuardState.Search => new Color(1f, 0.55f, 0.1f),
-                GuardState.Suspicious => new Color(1f, 0.9f, 0.2f),
-                GuardState.Return => new Color(0.5f, 0.8f, 1f),
-                _ => new Color(0.35f, 1f, 0.6f)
+                GuardState.Chase => new Color(1f, 0.2f, 0.2f),      // 빨강
+                GuardState.Search => new Color(1f, 0.55f, 0.1f),    // 주황
+                GuardState.Suspicious => new Color(1f, 0.9f, 0.2f), // 노랑
+                GuardState.Return => new Color(0.5f, 0.8f, 1f),     // 하늘
+                _ => new Color(0.35f, 1f, 0.6f)                     // 초록 (순찰)
             };
 
+            // 발각 상태일 때만 크기를 두근거리게 해서 눈에 확 띄게 한다.
             float pulse = State == GuardState.Chase ? 1f + Mathf.Sin(Time.time * 12f) * 0.25f : 1f;
             indicator.localScale = Vector3.one * 0.3f * pulse;
 
             if (indicatorRenderer != null)
             {
+                // MaterialPropertyBlock = 머티리얼을 복제하지 않고 이 렌더러의 색만 바꾸는 방법.
+                // renderer.material.color = ... 로 쓰면 유니티가 머티리얼 사본을 만들어서,
+                // 경비가 10명이면 머티리얼도 10개가 생긴다. 이 방식은 사본을 만들지 않는다.
                 indicatorRenderer.GetPropertyBlock(mpb);
                 mpb.SetColor(BaseColorId, c);
                 indicatorRenderer.SetPropertyBlock(mpb);
             }
         }
 
+        /// <summary>
+        /// OnDrawGizmos — 씬 뷰에 항상 그려지는 보조선(선택하지 않아도 보인다).
+        /// 순찰 경로를 선으로 이어 그려서 배치를 눈으로 확인할 수 있게 한다.
+        /// </summary>
         void OnDrawGizmos()
         {
             if (waypoints == null || waypoints.Length < 2) return;
@@ -652,8 +787,11 @@ namespace Stealth
             for (int i = 0; i < waypoints.Length; i++)
             {
                 if (waypoints[i] == null) continue;
+
+                // % 로 마지막 지점과 첫 지점도 이어준다 (순환 경로)
                 Transform next = waypoints[(i + 1) % waypoints.Length];
                 if (next == null) continue;
+
                 Gizmos.DrawLine(waypoints[i].position + Vector3.up * 0.1f, next.position + Vector3.up * 0.1f);
                 Gizmos.DrawWireSphere(waypoints[i].position + Vector3.up * 0.1f, 0.3f);
             }

@@ -12,6 +12,11 @@ namespace Stealth
     /// </summary>
     public class StealthMenuUI : MonoBehaviour
     {
+        // 메뉴도 상태머신이다. 지금 어느 화면인지를 변수 하나로 들고,
+        // Update 와 OnGUI 에서 그 값에 따라 갈라진다. 경비 AI 와 완전히 같은 구조다.
+        //
+        // enum 을 클래스 안에 선언하면 이 클래스에서만 쓰는 값이라는 뜻이 된다.
+        // 밖에서 쓸 일이 없으므로 파일을 따로 만들지 않았다.
         enum MenuScreen { Title, StageSelect, Controls, Paused }
 
         [Header("Branding")]
@@ -21,6 +26,13 @@ namespace Stealth
         [Header("Layout")]
         public int referenceHeight = 1080;
 
+        // ── 화면에 표시할 안내 문구들 ──
+        //
+        // (string key, string action) 는 튜플(tuple)이다. 클래스나 struct 를 따로 만들지 않고
+        // 값 두 개를 묶는 가벼운 방법. 이름을 붙여두면 row.key / row.action 으로 꺼낼 수 있다.
+        //
+        // 문구를 코드 중간이 아니라 여기 배열로 모아둔 이유는, 내용을 고칠 때
+        // 그리는 코드를 건드리지 않아도 되고 줄을 추가·삭제하기도 쉽기 때문이다.
         static readonly (string key, string action)[] ControlRows =
         {
             ("W A S D", "이동"),
@@ -51,13 +63,15 @@ namespace Stealth
             (new Color(1f, 0.3f, 0.3f), "발각 — 즉시 붙잡힌다"),
         };
 
-        MenuScreen screen = MenuScreen.Title;
-        MenuScreen controlsReturnTo = MenuScreen.Title;
+        MenuScreen screen = MenuScreen.Title;          // 지금 보고 있는 화면
+        MenuScreen controlsReturnTo = MenuScreen.Title; // 조작법 화면에서 뒤로 가면 돌아갈 곳
 
         float scale = 1f;
         float viewW, viewH;
         Vector2 mouse;
 
+        // 버튼 영역들. Layout() 에서 위치를 계산하고, Update() 에서 클릭 판정에,
+        // OnGUI() 에서 그리기에 같은 값을 쓴다. 그래서 그림과 판정이 절대 어긋나지 않는다.
         Rect startButton;
         Rect resumeButton;
         Rect stageSelectButton;
@@ -79,6 +93,11 @@ namespace Stealth
 
         // ------------------------------------------------------------ 입력
 
+        /// <summary>
+        /// 키보드(ESC)와 마우스 클릭을 받는다. 그리기는 OnGUI 에서 따로 한다.
+        /// 입력과 그리기를 나눠두면, 프레임당 여러 번 호출되는 OnGUI 에서
+        /// 클릭이 중복 처리되는 사고를 피할 수 있다.
+        /// </summary>
         void Update()
         {
             var gm = StealthGameManager.Instance;
@@ -160,8 +179,15 @@ namespace Stealth
             }
         }
 
+        /// <summary>
+        /// 화면 크기에 맞춰 모든 버튼의 위치를 다시 계산한다.
+        /// 위치를 상수로 박아두지 않고 매번 계산하는 이유는, 창 크기를 바꿔도
+        /// 버튼이 항상 가운데에 오게 하기 위해서다.
+        /// </summary>
         void Layout()
         {
+            // UnityEngine.Screen 이라고 전체 이름을 쓴 이유: 이 클래스 안에 MenuScreen 이라는
+            // 타입이 있어서 그냥 Screen 이라고 쓰면 컴파일러가 헷갈릴 수 있다.
             scale = Mathf.Max(0.75f, UnityEngine.Screen.height / (float)referenceHeight);
             viewW = UnityEngine.Screen.width / scale;
             viewH = UnityEngine.Screen.height / scale;
@@ -183,14 +209,21 @@ namespace Stealth
             controlsButton = new Rect(40f, viewH - 96f, 170f, 50f);
             backButton = new Rect((viewW - 200f) * 0.5f, viewH * 0.5f + 210f, 200f, 48f);
 
+            // ── 스테이지 카드 목록을 세로로 쌓는다 ──
             int count = StageCatalog.Stages.Length;
+
+            // 개수가 바뀌었을 때만 배열을 다시 만든다. 매 프레임 new 하면 쓰레기가 쌓인다.
             if (stageCards.Length != count) stageCards = new Rect[count];
 
             const float cardW = 600f;
             const float cardH = 78f;
             const float gap = 9f;
 
+            // 전체 높이 = 카드 높이×개수 + 간격×(개수-1).
+            // (cardH + gap) * count 에서 마지막 간격 하나를 빼는 식으로 계산했다.
             float totalH = count * (cardH + gap) - gap;
+
+            // 화면 중앙에서 전체 높이의 절반만큼 위로 올리면 세로 가운데 정렬이 된다.
             float top = viewH * 0.5f - totalH * 0.5f + 16f;
 
             for (int i = 0; i < count; i++)
@@ -297,6 +330,12 @@ namespace Stealth
             DrawButton(controlsButton, "조작키", true, new Color(0.6f, 0.68f, 0.78f));
         }
 
+        /// <summary>
+        /// 스테이지 카드 한 장. 고를 수 있는지·클리어했는지에 따라 색이 달라진다.
+        ///
+        /// 먼저 상태를 bool 변수 네 개로 뽑아낸 다음 그리는 순서를 지킨다.
+        /// 그리는 코드 안에 조건이 섞이면 어느 경우에 어떻게 보이는지 읽기 어려워진다.
+        /// </summary>
         void DrawStageCard(StageEntry stage, Rect card)
         {
             bool selectable = StageCatalog.IsSelectable(stage);

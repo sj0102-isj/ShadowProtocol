@@ -24,11 +24,13 @@ namespace Stealth
         MeshRenderer view;
         Mesh mesh;
         Material material;
-        Vector3[] vertices;
-        int[] triangles;
+        Vector3[] vertices;   // 꼭짓점 좌표 (중심 1개 + 테두리 segments+1개)
+        int[] triangles;      // 삼각형을 만드는 순서표
 
         void Awake()
         {
+            // GetComponentInParent = 자신과 부모를 거슬러 올라가며 찾는다.
+            // 이 다이얼은 자료(Objective)의 자식으로 붙기 때문에 부모에서 찾으면 된다.
             if (source == null) source = GetComponentInParent<Objective>();
 
             filter = GetComponent<MeshFilter>();
@@ -45,20 +47,23 @@ namespace Stealth
             segments = Mathf.Max(8, segments);
             vertices = new Vector3[segments + 2];
             triangles = new int[segments * 3];
+
+            // 삼각형 순서표는 한 번만 만든다. 매 프레임 바뀌는 건 꼭짓점 위치뿐이다.
             for (int i = 0; i < segments; i++)
             {
-                triangles[i * 3] = 0;
-                triangles[i * 3 + 1] = i + 1;
-                triangles[i * 3 + 2] = i + 2;
+                triangles[i * 3] = 0;          // 중심
+                triangles[i * 3 + 1] = i + 1;  // 테두리 점
+                triangles[i * 3 + 2] = i + 2;  // 그 다음 테두리 점
             }
 
             mesh = new Mesh { name = "CooldownDial" };
             mesh.MarkDynamic();
             filter.mesh = mesh;
 
-            view.enabled = false;
+            view.enabled = false;   // 쿨다운이 없을 때는 보이지 않는다
         }
 
+        /// <summary>코드로 만든 Mesh·Material 은 직접 치워야 메모리에 쌓이지 않는다.</summary>
         void OnDestroy()
         {
             if (mesh != null) Destroy(mesh);
@@ -68,9 +73,12 @@ namespace Stealth
         void LateUpdate()
         {
             float fill = 0f;
+
+            // 남은 시간 ÷ 전체 시간 = 남은 비율. 60초 중 42초 남았으면 0.7 이 된다.
             if (source != null && source.respawnDelay > 0f)
                 fill = Mathf.Clamp01(source.RespawnRemaining / source.respawnDelay);
 
+            // 비율이 0이면 아예 렌더러를 꺼버린다. 빈 메시를 그리는 것보다 싸다.
             view.enabled = fill > 0f;
             if (fill <= 0f) return;
 
@@ -83,13 +91,20 @@ namespace Stealth
         /// </summary>
         void Draw(float fill)
         {
-            float sweep = 360f * fill;
-            float step = sweep / segments;
+            float sweep = 360f * fill;     // 그릴 각도. 100%면 360도(완전한 원)
+            float step = sweep / segments; // 조각 하나당 각도
 
-            vertices[0] = Vector3.zero;
+            vertices[0] = Vector3.zero;    // 중심점
+
             for (int i = 0; i <= segments; i++)
             {
                 float angle = step * i;
+
+                // 각도 → 좌표 변환. sin 이 x, cos 이 z 인 이유는 12시(북쪽)에서 시작해
+                // 시계 방향으로 돌게 하기 위해서다.
+                //   angle 0 → (sin0, cos0) = (0, 1) = 북쪽
+                //   angle 90 → (1, 0) = 동쪽
+                // Deg2Rad 는 도(°)를 라디안으로 바꾸는 상수다. Mathf 의 삼각함수는 라디안을 받는다.
                 vertices[i + 1] = new Vector3(
                     Mathf.Sin(angle * Mathf.Deg2Rad) * radius,
                     0f,
