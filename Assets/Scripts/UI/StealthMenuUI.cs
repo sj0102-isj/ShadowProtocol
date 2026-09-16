@@ -132,6 +132,12 @@ namespace Stealth
             var m = Mouse.current;
             if (m == null || !m.leftButton.wasPressedThisFrame) return;
 
+            // 메뉴에서 왼쪽 버튼을 누르면 짧게 딸깍 소리를 낸다.
+            // 버튼을 정확히 맞혔는지까지 보지는 않는다. 버튼마다 소리를 넣으려면
+            // 아래 분기 여덟 군데에 같은 줄을 복사해야 하는데, 빈 곳을 눌렀을 때
+            // 소리가 나는 것은 아무도 문제 삼지 않을 정도라 한 곳에서 끝냈다.
+            GameAudio.Play(Sfx.UiClick);
+
             switch (screen)
             {
                 case MenuScreen.Title:

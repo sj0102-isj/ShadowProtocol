@@ -114,6 +114,9 @@ namespace Stealth
         /// <summary>레버가 호출한다. 이미 정전 중이면 시간만 다시 채운다.</summary>
         public void Trigger()
         {
+            // 이미 정전 중이면 소리를 또 내지 않는다. 시간만 다시 채운다.
+            if (!IsActive) GameAudio.Play(Sfx.BlackoutOn);
+
             IsActive = true;
             Remaining = duration;
         }
@@ -127,6 +130,7 @@ namespace Stealth
                 {
                     Remaining = 0f;
                     IsActive = false;
+                    GameAudio.Play(Sfx.BlackoutOff);   // 전원이 돌아오는 소리
                 }
             }
 

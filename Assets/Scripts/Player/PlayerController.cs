@@ -228,6 +228,7 @@ namespace Stealth
         /// <summary>은신처 안으로 들어간다. 위치를 통 한가운데로 옮겨 "들어갔다"를 눈에 보이게 한다.</summary>
         void EnterHideSpot(HideSpot spot)
         {
+            GameAudio.Play(Sfx.HideIn);
             CurrentHideSpot = spot;
             spot.IsOccupied = true;     // 은신처 쪽에도 "누가 들어왔다"고 알려준다
             IsCrawling = false;
@@ -243,6 +244,7 @@ namespace Stealth
             if (spot == null) return;
 
             spot.IsOccupied = false;
+            GameAudio.Play(Sfx.HideOut);
 
             Vector3 exit = spot.ExitPoint;
             Vector3 facing = exit - spot.InsidePoint;   // 벡터 뺄셈 = "여기서 저기로 가는 방향"
@@ -393,14 +395,22 @@ namespace Stealth
         }
 
         /// <summary>
-        /// 걸을 때 일정 간격으로 소리를 낸다. 경비가 그 소리를 듣고 찾아온다.
-        /// 지금은 walkNoiseRadius 가 0이라 실질적으로 꺼져 있다.
+        /// 걸을 때 일정 간격으로 발을 딛는다. 여기서 두 가지 일이 일어난다.
+        ///
+        ///   1. 플레이어가 <b>귀로 듣는</b> 발소리를 낸다 — 항상
+        ///   2. 경비가 <b>듣고 찾아오는</b> 소리를 퍼뜨린다 — walkNoiseRadius 가 0보다 클 때만
+        ///
+        /// 둘을 나눠 놓은 이유: 지금 walkNoiseRadius 는 0 이다(걸어도 경비가 못 듣는다).
+        /// 예전에는 이 함수가 맨 위에서 통째로 return 해 버려서, 발소리 효과음을 붙여도
+        /// 한 번도 재생되지 않았다. 게임 밸런스(경비가 듣는 범위)와 연출(내가 듣는 소리)은
+        /// 서로 다른 문제라서 같은 조건으로 묶으면 안 된다.
         /// </summary>
         void UpdateFootstepNoise()
         {
-            float radius = IsCrawling ? 0f : walkNoiseRadius;   // 기어갈 때는 소리가 안 난다
+            float radius = IsCrawling ? 0f : walkNoiseRadius;   // 기어갈 때는 경비가 못 듣는다
 
-            if (!IsMoving || radius <= 0f)
+            // 서 있거나 통 안에 숨어 있으면 발을 딛지 않는다.
+            if (!IsMoving || IsHidden)
             {
                 noiseTimer = 0f;    // 멈추면 타이머를 초기화해서, 다시 걸으면 즉시 한 발 소리가 나게
                 return;
@@ -411,8 +421,14 @@ namespace Stealth
             noiseTimer -= Time.deltaTime;
             if (noiseTimer > 0f) return;
 
-            noiseTimer = noiseInterval;
-            NoiseSystem.Emit(transform.position, radius, 0.7f);
+            // 길 때는 천천히 움직이므로 발 간격도 넓어야 걸음과 소리가 맞아 보인다.
+            noiseTimer = IsCrawling ? noiseInterval * 1.5f : noiseInterval;
+
+            // 음높이를 매번 조금씩 흔든다. 똑같은 소리를 반복하면 기계처럼 들린다.
+            GameAudio.Play(IsCrawling ? Sfx.FootstepCrawl : Sfx.Footstep,
+                           Random.Range(0.90f, 1.12f));
+
+            if (radius > 0f) NoiseSystem.Emit(transform.position, radius, 0.7f);
         }
 
         // ------------------------------------------------------------ 위치

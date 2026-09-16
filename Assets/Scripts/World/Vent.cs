@@ -81,6 +81,8 @@ namespace Stealth
         /// <summary>짝 환풍구로 순간이동시킨다.</summary>
         void Travel()
         {
+            GameAudio.Play(Sfx.Vent);
+
             // 도착점이 짝 환풍구 바로 위다. 서로를 바라보는 방향은 없으므로 회전은 유지한다.
             player.Teleport(linked.transform.position, player.transform.rotation);
 

@@ -165,6 +165,7 @@ namespace Stealth
         /// <summary>회수 완료. 숨기고 점수를 올린다.</summary>
         void Collect()
         {
+            GameAudio.Play(Sfx.Collect);
             Collected = true;
             HoldProgress = 1f;
             PlayerInRange = false;

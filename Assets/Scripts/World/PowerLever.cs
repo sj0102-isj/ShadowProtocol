@@ -89,6 +89,8 @@ namespace Stealth
                 return;
             }
 
+            GameAudio.Play(Sfx.Lever);
+
             BlackoutSystem.Instance.Trigger();
             CooldownRemaining = cooldown;
         }

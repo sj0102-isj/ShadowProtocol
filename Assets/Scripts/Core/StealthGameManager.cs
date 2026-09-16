@@ -251,11 +251,13 @@ namespace Stealth
             if (State != MissionState.Playing || CaptureSequenceActive) return;
 
             CaptureCount++;
+            GameAudio.Play(Sfx.Capture);
 
             if (CaptureCount >= maxCaptures)
             {
                 State = MissionState.Failed;
                 Time.timeScale = 0f;
+                GameAudio.Play(Sfx.Fail);
                 OnMissionEnded?.Invoke(State);   // 구독자(EndlessMode)에게 알린다
                 return;
             }
@@ -338,6 +340,7 @@ namespace Stealth
 
             State = MissionState.Success;
             Time.timeScale = 0f;
+            GameAudio.Play(Sfx.Success);
 
             StageProgress.MarkCleared(SceneManager.GetActiveScene().name, EvaluateRank());
             OnMissionEnded?.Invoke(State);

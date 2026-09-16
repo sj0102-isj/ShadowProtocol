@@ -66,6 +66,8 @@ namespace Stealth
             transform.rotation = Random.rotation;   // 아무 각도로 시작해야 던진 느낌이 난다
             gameObject.SetActive(true);
 
+            GameAudio.Play(Sfx.CoinThrow);
+
             flightTimer = 0f;
             idleTimer = 0f;
             InFlight = true;
@@ -170,6 +172,9 @@ namespace Stealth
 
             // 소리 파문은 그대로 방송하되(화면 표시용), 실제로 주우러 오는 경비는
             // 여기서 한 명만 정한다. 경비들이 각자 판단하면 전원이 몰려온다.
+            // 동전이 부딪히는 소리. 매번 음높이를 흔들어야 여러 번 던져도 지겹지 않다.
+            GameAudio.Play(Sfx.CoinLand, Random.Range(0.90f, 1.12f));
+
             NoiseSystem.Emit(at, noiseRadius, noiseStrength, transform);
             GuardAI.AlertNearestToCoin(at, noiseRadius, this);
         }

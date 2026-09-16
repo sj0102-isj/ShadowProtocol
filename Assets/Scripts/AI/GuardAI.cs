@@ -740,6 +740,15 @@ namespace Stealth
             State = next;
             stateTimer = 0f;
             if (agent.isOnNavMesh) agent.isStopped = false;
+
+            // 상태가 바뀌는 이 한 곳만 잡으면 경비 관련 효과음이 전부 처리된다.
+            // (색이 바뀌는 순간과 소리가 나는 순간이 자동으로 일치한다)
+            switch (next)
+            {
+                case GuardState.Suspicious: GameAudio.Play(Sfx.Suspicious); break;
+                case GuardState.Search:     GameAudio.Play(Sfx.Search);     break;
+                case GuardState.Chase:      GameAudio.Play(Sfx.Detected);   break;
+            }
         }
 
         // --------------------------------------------------------------- 유틸
