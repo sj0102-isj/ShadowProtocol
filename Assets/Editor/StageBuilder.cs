@@ -200,6 +200,12 @@ namespace Stealth.EditorTools
             for (int i = 0; i < stage.guardRoutes.Length; i++)
                 BuildGuard(actors.transform, stage.guardRoutes[i], i + 1, width, height);
 
+            // 배회형 경비는 고정 순찰 경비 다음 번호를 이어받는다. 하이어라키에서 구분되도록
+            // 이름에 (배회) 를 붙인다.
+            for (int i = 0; i < stage.roamRoutes.Length; i++)
+                BuildGuard(actors.transform, stage.roamRoutes[i],
+                    stage.guardRoutes.Length + i + 1, width, height, roam: true);
+
             for (int i = 0; i < stage.droneRoutes.Length; i++)
                 BuildDrone(actors.transform, stage.droneRoutes[i], i + 1, width, height);
 
@@ -1155,11 +1161,16 @@ namespace Stealth.EditorTools
             }
         }
 
-        static void BuildGuard(Transform parent, Vector2Int[] route, int index, int width, int height)
+        static void BuildGuard(Transform parent, Vector2Int[] route, int index, int width, int height,
+            bool roam = false)
         {
-            Vector3 spawn = GridToWorld(route[0].x, route[0].y, width, height);
+            // 배회형은 route 두 점이 사각형의 마주보는 모서리다. 구역 한가운데에서 시작한다.
+            Vector3 spawn = roam
+                ? Vector3.Lerp(GridToWorld(route[0].x, route[0].y, width, height),
+                               GridToWorld(route[1].x, route[1].y, width, height), 0.5f)
+                : GridToWorld(route[0].x, route[0].y, width, height);
 
-            var guard = new GameObject($"Guard {index}");
+            var guard = new GameObject(roam ? $"Guard {index} (배회)" : $"Guard {index}");
             guard.transform.SetParent(parent, false);
             guard.transform.position = spawn;
 
@@ -1274,6 +1285,18 @@ namespace Stealth.EditorTools
             var ai = guard.AddComponent<GuardAI>();
             ai.waypoints = waypoints;
             ai.indicator = indicator.transform;
+
+            if (roam)
+            {
+                // 두 모서리에서 사각형을 만든다. 어느 쪽이 좌상단인지 신경 쓰지 않아도 되도록
+                // 중심과 크기로 바꿔서 넘긴다.
+                Vector3 a = waypoints[0].position;
+                Vector3 b = waypoints[1].position;
+
+                ai.roam = true;
+                ai.roamCenter = (a + b) * 0.5f;
+                ai.roamSize = new Vector3(Mathf.Abs(a.x - b.x), 0f, Mathf.Abs(a.z - b.z));
+            }
         }
 
         const float DroneAltitude = 4.5f;
@@ -2036,6 +2059,15 @@ namespace Stealth.EditorTools
         /// </summary>
         public Vector2Int[][] guardRoutes;
 
+        /// <summary>
+        /// 구역을 무작위로 배회하는 경비. 항목 하나가 경비 한 명이고,
+        /// <b>Vector2Int 두 개가 사각형의 마주보는 두 모서리</b>다.
+        ///
+        /// 스테이지마다 한두 명만 둔다. 전원이 배회하면 "관찰해서 빈틈을 찾는다"는
+        /// 이 게임의 핵심이 사라지고, 잡혔을 때 내 실수가 아니라 운으로 느껴진다.
+        /// </summary>
+        public Vector2Int[][] roamRoutes = System.Array.Empty<Vector2Int[]>();
+
         /// <summary>공중 순찰 드론의 경로. 벽을 무시하므로 격자 위 아무 칸이나 찍어도 된다.</summary>
         public Vector2Int[][] droneRoutes = System.Array.Empty<Vector2Int[]>();
 
@@ -2102,6 +2134,11 @@ namespace Stealth.EditorTools
                 //       서쪽 크롤 통로(10,7)로 들어가는 게 정답 루트가 된다.
                 new[] { new Vector2Int(12, 7), new Vector2Int(15, 7) },
             },
+            // 배회형 1명 — 시작~탈출 사이 남쪽 통로. 정답 루트 위에 불확실성을 하나 둔다.
+            roamRoutes = new[]
+            {
+                new[] { new Vector2Int(7, 13), new Vector2Int(17, 15) },
+            },
         };
 
         /// <summary>
@@ -2144,6 +2181,11 @@ namespace Stealth.EditorTools
                 // 4번 · 우상단 방
                 new[] { new Vector2Int(18, 3), new Vector2Int(22, 3) },
             },
+            // 배회형 1명 — 북동 자료실. 자료를 지키는 대신 자리가 고정돼 있지 않다.
+            roamRoutes = new[]
+            {
+                new[] { new Vector2Int(17, 1), new Vector2Int(23, 3) },
+            },
         };
 
         /// <summary>
@@ -2181,6 +2223,11 @@ namespace Stealth.EditorTools
                 new[] { new Vector2Int(4, 5), new Vector2Int(20, 5) },
                 new[] { new Vector2Int(4, 9), new Vector2Int(20, 9) },
                 new[] { new Vector2Int(12, 5), new Vector2Int(12, 9) },
+            },
+            // 배회형 1명 — 중앙 대합실. 정전으로 건너야 하는 그 공간이다.
+            roamRoutes = new[]
+            {
+                new[] { new Vector2Int(6, 5), new Vector2Int(18, 9) },
             },
         };
 
@@ -2225,10 +2272,18 @@ namespace Stealth.EditorTools
                         new Vector2Int(21, 10), new Vector2Int(17, 10) }, // 우측 실험실
                 new[] { new Vector2Int(1, 7), new Vector2Int(1, 12) },    // 좌측 세로 연결로
             },
+            // 배회형 1명 — 동쪽 실험실. 드론이 복도를 맡고 여기는 사람이 맡는다.
+            roamRoutes = new[]
+            {
+                new[] { new Vector2Int(17, 8), new Vector2Int(21, 11) },
+            },
             droneRoutes = new[]
             {
-                new[] { new Vector2Int(2, 6), new Vector2Int(22, 6) },    // 상단 복도
-                new[] { new Vector2Int(22, 13), new Vector2Int(2, 13) },  // 하단 복도
+                // 1급 기밀(25,13)과 두꺼비집(26,13) 바로 위는 지나지 않게 비켜 놓았다.
+                // 드론까지 겹치면 중앙이 어려운 게 아니라 불가능해진다.
+                new[] { new Vector2Int(22, 3),  new Vector2Int(22, 21) },  // 남북 축
+                new[] { new Vector2Int(45, 16), new Vector2Int(11, 16) },  // 동서 축
+                new[] { new Vector2Int(7, 2),   new Vector2Int(41, 2) },   // 북쪽 순환로
             },
         };
 
@@ -2271,6 +2326,11 @@ namespace Stealth.EditorTools
                         new Vector2Int(22, 3), new Vector2Int(17, 3) },    // 우상 금고
                 new[] { new Vector2Int(14, 13), new Vector2Int(14, 15) },  // 우하 금고
             },
+            // 배회형 1명 — 남서 구역. 환풍구 2번 출구가 있는 방이다.
+            roamRoutes = new[]
+            {
+                new[] { new Vector2Int(1, 11), new Vector2Int(11, 15) },
+            },
             droneRoutes = new[]
             {
                 new[] { new Vector2Int(4, 2), new Vector2Int(4, 14) },     // 좌측 세로
@@ -2309,53 +2369,67 @@ namespace Stealth.EditorTools
             allowCoinThrow = true,
             grid = new[]
             {
-                "###############################################",
-                "#...........XX...................XX...........#",
-                "#......#..X..........................X...#....#",
-                "#......##....XXXXX..XhXXXXXX..hXXXXX.X..##....#",
-                "#..Xh....#h#.........................###..hX..#",
-                "#..XX......###.....................###....XX..#",
-                "#......XX....#c#..XXXXX..XXXXX...#c#..........#",
-                "#X.XXX.........#h...1...........##.........X.X#",
-                "#................##c###...h#####...........X..#",
-                "#...XX...........#.............#...#.XXX......#",
-                "#...XX..XXXXX....#..XX.....XX..#...#..........#",
-                "#...XX...........#..XX.....XX..#...#.#######..#",
-                "#..2.......h............GL....................#",
-                "#........XXX.....#..XX.....XX..#...######.##..#",
-                "#...XXXXX..X.....#..Xh.....hX..#...#..........#",
-                "#................#.............#...#......XX..#",
-                "#...XX...........######...###c##..............#",
-                "#X....XXX......##...............##.........2.X#",
-                "#............###.................###..XXX.....#",
-                "#..........#cXXX....XXX....XXX....XXc#XX......#",
-                "#..XX....###.XXX....hXX....XXh....XX.###......#",
-                "#..XX..##..X.........................X..##XX..#",
-                "#......#....X....XXX.....XXX.........X.1.#....#",
-                "#.P.........XX...................XX...........#",
-                "###############################################",
+                "#################################################",
+                "########################1########################",
+                "##...........XX.........c.........XX...........##",
+                "##......#..X..........................X...#....##",
+                "##......##....XXXXX..XhXXXXXX..hXXXXX.X..##....##",
+                "##..Xh....#h#.........................###..hX..##",
+                "##..XX......###.....................###....XX..##",
+                "##......XX....#c#..XXXXX..XXXXX...#c#..........##",
+                "##X.XXX.........#h...............##.........X.X##",
+                "##................##c###...h#####...........X..##",
+                "##...XX...........#.............#...#.XXX......##",
+                "##...XX..XXXXX....#..XX.....XX..#...#..........##",
+                "##...XX...........#..XX.....XX..#...#.#######..##",
+                "#2c.........h............GL...................c2#",
+                "##........XXX.....#..XX.....XX..#...######.##..##",
+                "##...XXXXX..X.....#..Xh.....hX..#...#..........##",
+                "##................#.............#...#......XX..##",
+                "##...XX...........######...###c##..............##",
+                "##X....XXX......##...............##...........X##",
+                "##............###.................###..XXX.....##",
+                "##..........#cXXX....XXX....XXX....XXc#XX......##",
+                "##..XX....###.XXX....hXX....XXh....XX.###......##",
+                "##..XX..##..X.........................X..##XX..##",
+                "##......#....X....XXX.....XXX.........X...#....##",
+                "##.P.........XX.........c.........XX...........##",
+                "########################1########################",
+                "#################################################",
             },
             guardRoutes = new[]
             {
                 // 중앙 열람홀 — 1급 기밀이 있는 곳이라 넷이 둘러싼다
-                new[] { new Vector2Int(19, 10), new Vector2Int(29, 10) },  // 홀 북쪽
-                new[] { new Vector2Int(29, 14), new Vector2Int(19, 14) },  // 홀 남쪽
-                new[] { new Vector2Int(19, 10), new Vector2Int(19, 14) },  // 홀 서쪽
-                new[] { new Vector2Int(29, 14), new Vector2Int(29, 10) },  // 홀 동쪽
-                new[] { new Vector2Int(14, 4), new Vector2Int(32, 4) },    // 북 서고
-                new[] { new Vector2Int(17, 18), new Vector2Int(31, 18) },  // 남 하역장
-                new[] { new Vector2Int(36, 12), new Vector2Int(43, 12) },  // 동 사무실
-                new[] { new Vector2Int(10, 11), new Vector2Int(16, 11) },  // 서 기계실
-                new[] { new Vector2Int(3, 1), new Vector2Int(11, 1) },     // 북서 순환로
-                new[] { new Vector2Int(35, 1), new Vector2Int(44, 1) },    // 북동 순환로
+                new[] { new Vector2Int(20, 11), new Vector2Int(30, 11) },   // 홀 북쪽
+                new[] { new Vector2Int(30, 15), new Vector2Int(20, 15) },   // 홀 남쪽
+                new[] { new Vector2Int(20, 11), new Vector2Int(20, 15) },   // 홀 서쪽
+                new[] { new Vector2Int(30, 15), new Vector2Int(30, 11) },   // 홀 동쪽
+                new[] { new Vector2Int(15, 5),  new Vector2Int(33, 5) },    // 북 서고
+                new[] { new Vector2Int(18, 19), new Vector2Int(32, 19) },   // 남 하역장
+                new[] { new Vector2Int(37, 13), new Vector2Int(44, 13) },   // 동 사무실
+                new[] { new Vector2Int(11, 12), new Vector2Int(17, 12) },   // 서 기계실
+                new[] { new Vector2Int(4, 2),   new Vector2Int(12, 2) },    // 북서 순환로
+                new[] { new Vector2Int(36, 2),  new Vector2Int(45, 2) },    // 북동 순환로
+            },
+            // 배회형 4명 — 중앙 열람홀을 동서남북으로 감싼다.
+            // 고정 순찰 10명이 홀 안과 주요 축을 맡고, 그 바깥 네 구역은 이쪽이 맡는다.
+            roamRoutes = new[]
+            {
+                // 북↔남은 y=13 에 대해 완전히 대칭이다.
+                // 서↔동은 대칭을 조금 깼다 — 동을 x=33 에서 시작하면 북 구역(y2~7)과
+                // x33~35 에서 겹쳐서, 같은 자리를 두 명이 동시에 도는 구간이 생긴다.
+                new[] { new Vector2Int(17, 2),  new Vector2Int(35, 7) },    // 북 서고    19x6
+                new[] { new Vector2Int(17, 19), new Vector2Int(35, 24) },   // 남 하역장  19x6
+                new[] { new Vector2Int(2, 6),   new Vector2Int(14, 20) },   // 서 기계실  13x15
+                new[] { new Vector2Int(36, 6),  new Vector2Int(46, 20) },   // 동 사무실  11x15
             },
             droneRoutes = new[]
             {
                 // 1급 기밀(24,12)과 두꺼비집(25,12) 바로 위는 지나지 않게 비켜 놓았다.
                 // 드론까지 겹치면 중앙이 어려운 게 아니라 불가능해진다.
-                new[] { new Vector2Int(21, 2), new Vector2Int(21, 20) },   // 남북 축
-                new[] { new Vector2Int(44, 15), new Vector2Int(10, 15) },  // 동서 축
-                new[] { new Vector2Int(6, 1), new Vector2Int(40, 1) },     // 북쪽 순환로
+                new[] { new Vector2Int(22, 3),  new Vector2Int(22, 22) },   // 남북 축
+                new[] { new Vector2Int(45, 16), new Vector2Int(11, 16) },   // 동서 축
+                new[] { new Vector2Int(7, 2),   new Vector2Int(41, 2) },    // 북쪽 순환로
             },
             endless = true,
             endlessObjectiveCount = 5,

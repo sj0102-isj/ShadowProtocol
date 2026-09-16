@@ -22,8 +22,12 @@ namespace Stealth
         [Range(10f, 180f)] public float fovAngle = 90f;  // 시야각. 90이면 정면 기준 좌우 45도씩
 
         public float eyeHeight = 1.65f;      // 눈높이(m). 여기서 플레이어를 향해 선을 긋는다
-        [Tooltip("등 뒤라도 이 거리 안에 들어오면 인기척으로 알아챈다.")]
-        public float proximityRadius = 2.2f; // 시야각과 무관하게 감지되는 반경
+        [Tooltip(
+            "등 뒤라도 이 거리 안에 들어오면 인기척으로 알아챈다.\n" +
+            "격자 한 칸이 2m 이므로 2.2 는 '한 칸 조금 넘게' 였다. 등 뒤로 지나가려면 " +
+            "두 칸을 띄워야 해서 답답했다. 1.3 은 '바로 옆 칸까지만' 이라 " +
+            "한 칸 띄우고 지나가는 플레이가 가능해진다.")]
+        public float proximityRadius = 1.3f; // 시야각과 무관하게 감지되는 반경
 
         [Header("Cone Mesh")]
         [Tooltip("높을수록 부드럽지만 레이캐스트가 늘어난다.")]
@@ -279,6 +283,24 @@ namespace Stealth
                 // 맞은 게 플레이어 본인이면 가로막힌 게 아니라 제대로 본 것이다.
                 // 플레이어가 아닌 무언가에 막혔으면 안 보인다.
                 if (hit.collider.GetComponentInParent<PlayerController>() == null) return false;
+            }
+
+            // 4) 콘과 같은 높이에서 한 번 더 — 화면과 판정을 강제로 일치시킨다.
+            //
+            // 위의 3번은 눈(1.65)에서 플레이어 눈(서면 1.2, 기어가면 0.45)으로 '비스듬히' 긋는다.
+            // 그래서 크롤 통로 상인방(바닥 1.25) 아래로 선이 빠져나가는 각이 생긴다.
+            // 반면 콘은 rayHeight(1.5)에서 수평으로 쏘므로 그 자리에서 잘린다.
+            //   → 화면에는 콘이 안 보이는데 발각되는, 플레이어 입장에서 가장 억울한 상황.
+            //
+            // 콘이 쓰는 것과 똑같은 높이·똑같은 수평선으로 한 번 더 검사하면 둘이 어긋날 수 없다.
+            // 낮은 엄폐물(0.90)은 1.5보다 낮아 이 검사에 걸리지 않으므로 엄폐는 그대로 작동한다.
+            Vector3 flatEye = transform.position + Vector3.up * rayHeight;
+            var flatTarget = new Vector3(targetPoint.x, flatEye.y, targetPoint.z);
+
+            if (Physics.Linecast(flatEye, flatTarget, out RaycastHit flatHit, ~0,
+                    QueryTriggerInteraction.Ignore))
+            {
+                if (flatHit.collider.GetComponentInParent<PlayerController>() == null) return false;
             }
 
             // 여기까지 왔으면 보인다. 얼마나 가까운지를 0~1 로 환산해 돌려준다.

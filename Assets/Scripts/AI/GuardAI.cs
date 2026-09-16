@@ -78,6 +78,15 @@ namespace Stealth
         [Tooltip("던진 동전 앞에서 두리번거리는 시간(초).")]
         public float coinInspectSeconds = 2.5f;
 
+        [Header("Roam")]
+        [Tooltip(
+            "켜면 정해진 순찰 지점을 도는 대신 지정된 사각형 구역 안을 무작위로 돌아다닌다.\n" +
+            "스테이지마다 한두 명만 이렇게 두는 것이 설계 의도다 — 전원이 배회하면 " +
+            "'관찰해서 빈틈을 찾는다'는 게임의 핵심이 사라진다.")]
+        public bool roam;
+        public Vector3 roamCenter;   // 구역의 한가운데 (월드 좌표)
+        public Vector3 roamSize;     // 구역의 가로·세로 크기
+
         [Header("Indicator")]
         public Transform indicator;   // 머리 위 상태 표시 큐브
 
@@ -130,10 +139,18 @@ namespace Stealth
         //  유니티 생명주기
         // ============================================================
 
+        // ── 개체별 성격 ──
+        // 경비마다 다르게 보이되, 같은 경비는 항상 같아야 한다.
+        // 매번 다르면 플레이어가 패턴을 못 배우고, 잡혀도 "내 실수"가 아니라 "운"이 된다.
+        // 잠입 게임에서 관찰 가능성은 절대 포기할 수 없는 값이다.
+        bool scanLeftFirst = true;   // 좌→우 로 볼지, 우→좌 로 볼지
+        bool skipSideScan;           // 게으른 개체는 좌우를 아예 안 본다
+
         void Awake()
         {
             agent = GetComponent<NavMeshAgent>();
             vision = GetComponent<GuardVision>();
+            ApplyPersonality();
 
             // NavMeshAgent 가 회전까지 맡으면 두리번거리기를 우리가 제어할 수 없다.
             // 회전은 직접 UpdateRotation() 에서 처리한다.
@@ -167,13 +184,56 @@ namespace Stealth
             NoiseSystem.OnNoise -= HandleNoise;   // -= 는 구독 해지
         }
 
+        /// <summary>
+        /// 순찰 습관을 경비마다 무작위로 정한다. 한 번만(Awake) 뽑으므로
+        /// <b>한 판 안에서는 각 경비가 자기 습관을 계속 유지한다.</b> 매 순찰마다 바뀌면
+        /// 플레이어가 아무것도 배울 수 없어서 잡혀도 자기 실수로 느껴지지 않는다.
+        ///
+        /// 흔드는 것은 <b>보는 순서</b>와 <b>좌우 확인 여부</b> 둘뿐이다.
+        ///
+        /// 대기 시간 · 고개 속도 · 시야각 · 이동 속도는 전원 같은 값으로 둔다.
+        /// 그 넷은 난이도에 직접 걸리는 수치라, 흔들면 1~5 스테이지에서 시야 커버리지를
+        /// 계산해 맞춰둔 밸런스가 같이 무너진다. 반면 순서와 생략은 난이도가 아니라
+        /// <b>리듬</b>을 바꾸는 값이라 마음껏 흔들어도 안전하다.
+        /// </summary>
+        void ApplyPersonality()
+        {
+            // 보는 순서. 절반은 오른쪽부터 본다.
+            scanLeftFirst = Random.value < 0.5f;
+
+            // 셋 중 하나꼴로 좌우를 아예 건너뛰고 바로 다음 지점으로 간다.
+            // 둘 중에 이게 훨씬 눈에 띈다 — "쟤는 뒤를 안 돌아보네"가 바로 읽힌다.
+            skipSideScan = Random.value < 0.33f;
+        }
+
         /// <summary>Start — 모든 오브젝트의 Awake 가 끝난 뒤 한 번. 남을 찾을 때는 여기서 한다.</summary>
         void Start()
         {
             player = Object.FindFirstObjectByType<PlayerController>();
 
-            if (waypoints != null && waypoints.Length > 0 && waypoints[0] != null)
-                GoTo(waypoints[0].position, patrolSpeed);
+            if (waypoints == null || waypoints.Length == 0) return;
+
+            // ── 출발을 어긋나게 한다 ──
+            // 경비는 순찰 지점 0번 위에 스폰된다. 전원이 0번을 목표로 삼으면
+            //   ① 모두 "이미 도착" 상태가 되어 같은 순간에 두리번거리기를 시작하고
+            //   ② 같은 순간에 끝나 ③ 다 같이 1번 지점으로 출발한다.
+            // 경로가 대부분 가로 한 쌍이라, 게임을 켜면 전원이 한 덩어리로 오른쪽으로 갔다.
+            //
+            // 목표 지점을 무작위로 고르면 절반은 서서 살피고 절반은 바로 걷기 시작한다.
+            if (roam)
+            {
+                GoTo(RandomPointInArea(), patrolSpeed);
+            }
+            else
+            {
+                waypointIndex = Random.Range(0, waypoints.Length);
+                if (waypoints[waypointIndex] != null) GoTo(waypoints[waypointIndex].position, patrolSpeed);
+            }
+
+            // 두리번거림 박자도 어긋나게 한다. 이게 없으면 제자리에 선 경비들끼리
+            // 고개를 똑같이 맞춰 돌려서 여전히 한 덩어리로 보인다.
+            scanTimer = Random.Range(0f, arrivePause);
+            scanStep = Random.Range(0, 4);
         }
 
         void Update()
@@ -399,18 +459,31 @@ namespace Stealth
             // 자기 출력이 입력으로 되먹임되어 회전이 누적된다.
             if (!lookBaseSet)
             {
-                lookBaseYaw = waypoints[waypointIndex] != null
+                // 배회형은 매번 목적지가 달라서 순찰 지점의 방향이 의미가 없다.
+                // 걸어온 방향(= 지금 보고 있는 쪽)을 그대로 기준으로 삼는다.
+                lookBaseYaw = !roam && waypoints[waypointIndex] != null
                     ? waypoints[waypointIndex].eulerAngles.y   // 순찰 지점이 가진 방향을 기준으로
                     : transform.eulerAngles.y;
                 lookBaseSet = true;
             }
 
-            // 단계별로 기준에서 얼마나 틀 것인가
+            // 게으른 개체는 0단계(정지)만 하고 바로 다음 지점으로 간다.
+            if (skipSideScan && scanStep >= 1)
+            {
+                scanStep = 0;
+                scanTimer = 0f;
+                AdvanceWaypoint();
+                return;
+            }
+
+            // 단계별로 기준에서 얼마나 틀 것인가.
+            // scanLeftFirst 가 false 인 개체는 부호가 뒤집혀 오른쪽부터 본다.
+            float side = scanLeftFirst ? 1f : -1f;
             float offset = scanStep switch
             {
-                1 => -lookAroundAngle,   // 왼쪽
-                2 => lookAroundAngle,    // 오른쪽
-                _ => 0f                  // 0단계와 3단계는 정면
+                1 => -lookAroundAngle * side,   // 먼저 보는 쪽
+                2 => lookAroundAngle * side,    // 나중에 보는 쪽
+                _ => 0f                         // 0단계와 3단계는 정면
             };
             lookTarget = Quaternion.Euler(0f, lookBaseYaw + offset, 0f);
 
@@ -436,12 +509,55 @@ namespace Stealth
 
             // 네 단계를 다 마쳤으면 다음 순찰 지점으로 출발
             scanStep = 0;
+            AdvanceWaypoint();
+        }
+
+        /// <summary>다음 목적지로 출발한다. 배회형이면 구역 안의 새 지점을 뽑는다.</summary>
+        void AdvanceWaypoint()
+        {
+            if (roam)
+            {
+                GoTo(RandomPointInArea(), patrolSpeed);
+                return;
+            }
 
             // % 는 나머지 연산. 마지막 지점 다음이 다시 0번이 되어 순환한다.
             waypointIndex = (waypointIndex + 1) % waypoints.Length;
 
             if (waypoints[waypointIndex] != null)
                 GoTo(waypoints[waypointIndex].position, patrolSpeed);
+        }
+
+        /// <summary>
+        /// 배회 구역 안에서 갈 수 있는 지점을 하나 고른다.
+        ///
+        /// 너무 가까운 곳을 고르면 제자리에서 맴도는 것처럼 보이므로, 지금 위치에서
+        /// 일정 거리 이상 떨어진 곳을 우선으로 찾는다. 몇 번 실패하면 조건을 버리고
+        /// 아무 데나 고른다 — 자리를 못 찾아 멈춰 서는 것보다는 낫다.
+        /// </summary>
+        Vector3 RandomPointInArea()
+        {
+            Vector3 fallback = transform.position;
+
+            for (int attempt = 0; attempt < 12; attempt++)
+            {
+                var candidate = new Vector3(
+                    roamCenter.x + Random.Range(-roamSize.x, roamSize.x) * 0.5f,
+                    roamCenter.y,
+                    roamCenter.z + Random.Range(-roamSize.z, roamSize.z) * 0.5f);
+
+                // 뽑은 점이 벽 안일 수 있으므로 갈 수 있는 자리로 당긴다.
+                if (!NavMesh.SamplePosition(candidate, out NavMeshHit hit, 3f, NavMesh.AllAreas)) continue;
+
+                fallback = hit.position;
+
+                // 처음 8번은 "충분히 먼 곳"만 받는다. 그 뒤로는 조건을 푼다.
+                if (attempt < 8 && (hit.position - transform.position).sqrMagnitude < 16f) continue;
+
+                return hit.position;
+            }
+
+            return fallback;
         }
 
         /// <summary>의심 상태. 멈춰 서서 그쪽을 노려보다가, 시간이 지나면 확인하러 간다.</summary>
