@@ -34,10 +34,18 @@ namespace Stealth
 
         Transform player;
 
+        /// <summary>이번 판을 시작할 때의 기록. "신기록!" 을 띄울지 판단하는 기준이다.</summary>
+        //
+        // HighScore 는 점수를 딸 때마다 갱신되므로 기준으로 쓸 수 없다.
+        // (1점만 따도 HighScore 가 따라 올라가서 "지금 점수 > HighScore" 가 영원히 거짓이 된다)
+        // 그래서 판이 시작될 때의 값을 따로 얼려 둔다.
+        int recordAtStart;
+
         void Awake()
         {
             Instance = this;
             HighScore = StageProgress.EndlessHighScore;   // 저장된 기록을 읽어온다
+            recordAtStart = HighScore;
         }
 
         void OnDestroy()
@@ -57,9 +65,25 @@ namespace Stealth
         }
 
         /// <summary>미션이 끝나면(목숨 소진) 최고 점수를 갱신한다.</summary>
-        void HandleMissionEnded(MissionState state)
+        void HandleMissionEnded(MissionState state) => SaveScore();
+
+        /// <summary>지금 점수를 곧바로 기록에 반영한다.</summary>
+        //
+        // 예전에는 미션이 끝나는 순간(목숨 소진)에만 저장했다.
+        // 그런데 무한모드에는 "끝"이 아닌 퇴장 경로가 여러 개 있다.
+        //
+        //   ESC -> 스테이지 선택으로 나가기   <- OnMissionEnded 가 안 불린다
+        //   창 닫기 / 강제 종료               <- 마찬가지
+        //
+        // 이 경로로 나가면 20점을 따 놓고도 기록이 0으로 남았다.
+        // 그래서 "끝날 때 저장"을 버리고 점수를 딸 때마다 저장하는 방식으로 바꿨다.
+        // 나가는 방법이 몇 가지든 상관없어진다 - 이미 저장돼 있기 때문이다.
+        //
+        // 매번 저장하는 게 낭비처럼 보이지만 자료 회수는 몇 초에 한 번이고
+        // 저장하는 값은 정수 하나다. 체감되는 비용이 없다.
+        void SaveScore()
         {
-            NewRecord = Score > StageProgress.EndlessHighScore;
+            NewRecord = Score > recordAtStart;
 
             // StageProgress.EndlessHighScore 의 set 안에 "더 높을 때만 저장" 검사가 들어 있다.
             // 그래서 여기서는 비교 없이 그냥 넣어도 된다.
@@ -70,6 +94,9 @@ namespace Stealth
         /// <summary>자료를 회수했을 때 StealthGameManager 가 호출한다.</summary>
         public void OnObjectiveCollected(Objective objective)
         {
+            // 점수가 오른 직후다. 여기서 바로 저장해 두면 어떻게 나가도 기록이 남는다.
+            SaveScore();
+
             if (objective == null) return;
 
             // 중앙의 고액 자료처럼 자리 자체가 의미인 것은 원래 자리에서 되살아난다.
