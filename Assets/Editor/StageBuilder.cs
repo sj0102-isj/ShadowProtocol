@@ -4,6 +4,8 @@ using UnityEditor;                  // MenuItem, EditorSceneManager 등 에디�
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.AI;
+using UnityEngine.Rendering;            // Volume, VolumeProfile, AmbientMode
+using UnityEngine.Rendering.Universal;  // Bloom, Vignette, Tonemapping, ColorAdjustments
 
 // ★ 이 파일은 Assets/Editor/ 폴더 안에 있다. 유니티는 이 폴더의 스크립트를
 //   "에디터 전용"으로 취급해서 게임 빌드에 포함하지 않는다.
@@ -247,6 +249,7 @@ namespace Stealth.EditorTools
             BuildSystems(root.transform, stage, walkable);
             SetupCamera();
             SetupLight();
+            SetupPostProcessing(root.transform);
             EnsureSceneRegistered();
 
             EditorSceneManager.MarkSceneDirty(scene);
@@ -615,12 +618,14 @@ namespace Stealth.EditorTools
             var root = new GameObject("FloorDetail").transform;
             root.SetParent(parent, false);
 
-            Material line = MaterialFor("Greybox_FloorLine", new Color(0.23f, 0.25f, 0.29f));
+            // 바닥(0.17, 0.18, 0.21)과 충분히 차이가 나야 선으로 보인다.
+            // 처음엔 0.23 으로 뒀는데 있는 줄도 모를 만큼 흐려서 올렸다.
+            Material line = MaterialFor("Greybox_FloorLine", new Color(0.32f, 0.35f, 0.41f));
 
             float halfW = width * Cell * 0.5f;
             float halfH = height * Cell * 0.5f;
             const float y = 0.012f;      // 바닥(윗면 0)보다 아주 조금 위
-            const float thickness = 0.05f;
+            const float thickness = 0.07f;
 
             // 세로선 — 칸 경계마다 한 줄
             for (int x = 0; x <= width; x++)
@@ -982,7 +987,9 @@ namespace Stealth.EditorTools
             cc.stepOffset = 0.3f;
 
             // 도둑. 짙은 남색 상하의에 흰 줄무늬, 눈만 내놓은 검은 복면.
-            Material mat = MaterialFor("Actor_Player", new Color(0.19f, 0.21f, 0.33f));
+            // 너무 어두우면 어두운 바닥에 묻혀서 눈이 없으면 못 찾는다. 도둑 느낌은 유지하되
+            // 바닥(0.17)보다는 확실히 밝은 값으로 잡았다.
+            Material mat = MaterialFor("Actor_Player", new Color(0.26f, 0.30f, 0.48f));
 
             var body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             body.name = "Body";
@@ -1021,6 +1028,17 @@ namespace Stealth.EditorTools
             StripCollider(nose);
             nose.GetComponent<Renderer>().sharedMaterial =
                 MaterialFor("Actor_PlayerStripe", new Color(0.86f, 0.89f, 0.94f));
+
+            // 발밑 링. 쿼터뷰에서 내 캐릭터를 놓치지 않게 하는 가장 싼 장치다.
+            // 몸통이 아니라 Player 루트의 자식이라 웅크려도 바닥에 그대로 남는다.
+            var footprint = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            footprint.name = "Footprint";
+            footprint.transform.SetParent(player.transform, false);
+            footprint.transform.localPosition = new Vector3(0f, 0.025f, 0f);
+            footprint.transform.localScale = new Vector3(1.25f, 0.01f, 1.25f);
+            StripCollider(footprint);
+            footprint.GetComponent<Renderer>().sharedMaterial =
+                MaterialFor("Actor_PlayerRing", new Color(0.45f, 0.85f, 1f, 0.30f), "Stealth/FOVCone");
 
             // 정전 중 플레이어 주변만 비추는 조명. 평소에는 꺼져 있다.
             var lightObject = new GameObject("BlackoutLight");
@@ -1708,6 +1726,12 @@ namespace Stealth.EditorTools
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = new Color(0.03f, 0.04f, 0.06f);
 
+            // ★ 이 체크가 꺼져 있으면 볼륨을 아무리 잘 만들어도 화면에 아무 변화가 없다.
+            //   URP 는 카메라마다 포스트 프로세싱 적용 여부를 따로 들고 있다.
+            var camData = cam.GetUniversalAdditionalCameraData();
+            camData.renderPostProcessing = true;
+            camData.antialiasing = AntialiasingMode.FastApproximateAntialiasing;
+
             var follow = cam.GetComponent<IsoCameraFollow>();
             if (follow == null) follow = cam.gameObject.AddComponent<IsoCameraFollow>();
             follow.pitch = 55f;
@@ -1730,10 +1754,123 @@ namespace Stealth.EditorTools
                 directional.type = LightType.Directional;
             }
 
-            directional.transform.rotation = Quaternion.Euler(52f, -35f, 0f);
-            directional.intensity = 1.05f;
-            directional.color = new Color(0.95f, 0.96f, 1f);
+            // 각도를 낮춰(52 → 44) 그림자를 길게 뽑는다. 위에서 내려다보는 시점이라
+            // 그림자 길이가 곧 물체의 높이 정보가 된다.
+            directional.transform.rotation = Quaternion.Euler(44f, -38f, 0f);
+            directional.intensity = 1.25f;
+
+            // 살짝 따뜻한 키 라이트 + 차가운 주변광. 두 색이 맞서야 회색 덩어리가
+            // 입체로 보인다. 같은 색이면 밝기 차이만 남아 밋밋해진다.
+            directional.color = new Color(1f, 0.95f, 0.86f);
             directional.shadows = LightShadows.Soft;
+            directional.shadowStrength = 0.75f;
+
+            // 주변광(그림자 속 밝기). Flat 으로 고정해야 BlackoutSystem 이 정전 때
+            // 이 값을 안전하게 낮췄다 되돌릴 수 있다.
+            RenderSettings.ambientMode = AmbientMode.Flat;
+            RenderSettings.ambientLight = new Color(0.20f, 0.24f, 0.34f);
+            RenderSettings.ambientIntensity = 1f;
+
+            // 옅은 안개. 멀리 있는 벽이 배경으로 가라앉아 깊이감이 생긴다.
+            // 맵 대각선이 100m 남짓이라 그보다 짧게 끊어야 효과가 보인다.
+            RenderSettings.fog = true;
+            RenderSettings.fogMode = FogMode.Linear;
+            RenderSettings.fogColor = new Color(0.05f, 0.06f, 0.09f);
+            RenderSettings.fogStartDistance = 26f;
+            RenderSettings.fogEndDistance = 85f;
+        }
+
+        /// <summary>
+        /// 전 스테이지에 같은 포스트 프로세싱을 깐다.
+        ///
+        /// 지금까지 볼륨이 SampleScene 에만 있어서 스테이지마다 화면이 달랐다.
+        /// 스테이지 루트 안에 만들면 재생성할 때마다 같이 새로 깔린다.
+        ///
+        /// priority 를 10으로 두는 이유: URP 템플릿이 남긴 "Global Volume"(priority 0)이
+        /// SampleScene 에 있는데, 겹칠 때 우리 설정이 이기게 하기 위해서다.
+        /// </summary>
+        static void SetupPostProcessing(Transform parent)
+        {
+            var go = new GameObject("Post Process Volume");
+            go.transform.SetParent(parent, false);
+
+            var volume = go.AddComponent<Volume>();
+            volume.isGlobal = true;      // 카메라 위치와 무관하게 항상 적용
+            volume.priority = 10f;
+            volume.weight = 1f;
+            volume.sharedProfile = PostProcessProfile();
+        }
+
+        /// <summary>
+        /// 포스트 프로세싱 프로파일 에셋을 만들거나 갱신한다.
+        /// 머티리얼과 같은 방식이다 — 에셋으로 저장해 두면 여섯 스테이지가 하나를 공유하고,
+        /// 값을 바꾸면 전부 한 번에 바뀐다.
+        /// </summary>
+        static VolumeProfile PostProcessProfile()
+        {
+            const string dir = "Assets/Settings";
+            if (!AssetDatabase.IsValidFolder(dir)) AssetDatabase.CreateFolder("Assets", "Settings");
+
+            string path = $"{dir}/Stealth_PostProcess.asset";
+            var profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>(path);
+
+            if (profile == null)
+            {
+                profile = ScriptableObject.CreateInstance<VolumeProfile>();
+                AssetDatabase.CreateAsset(profile, path);
+            }
+
+            // --- 톤매핑 --- 밝기 값을 화면 색으로 옮기는 곡선. 없으면 밝은 곳이 하얗게 날아간다.
+            var tone = Effect<Tonemapping>(profile);
+            Set(tone.mode, TonemappingMode.Neutral);
+
+            // --- 색 보정 --- 지금 화면이 회색·갈색뿐이라 여기서 가장 크게 달라진다.
+            var color = Effect<ColorAdjustments>(profile);
+            Set(color.postExposure, 0.35f);                          // 전체를 살짝 밝게
+            Set(color.contrast, 14f);                                // 어두운 곳은 더 어둡게
+            Set(color.saturation, 10f);                              // 색이 살아나게
+            Set(color.colorFilter, new Color(0.96f, 0.97f, 1f));     // 아주 옅은 푸른기
+
+            // --- 블룸 --- 밝은 것이 번진다. 시야 콘·자료 빛무리·탈출구 등이 살아난다.
+            var bloom = Effect<Bloom>(profile);
+            Set(bloom.threshold, 0.85f);   // 이보다 밝은 픽셀만 번진다. 낮추면 전체가 뿌옇다
+            Set(bloom.intensity, 0.9f);
+            Set(bloom.scatter, 0.68f);     // 번지는 범위
+
+            // --- 비네트 --- 화면 가장자리를 어둡게. 시선이 가운데(플레이어)로 모인다.
+            var vignette = Effect<Vignette>(profile);
+            Set(vignette.intensity, 0.32f);
+            Set(vignette.smoothness, 0.45f);
+            Set(vignette.color, new Color(0.02f, 0.03f, 0.05f));
+
+            EditorUtility.SetDirty(profile);
+            AssetDatabase.SaveAssets();
+            return profile;
+        }
+
+        /// <summary>
+        /// 프로파일에서 효과를 꺼내고, 없으면 만들어 붙인다.
+        /// 효과는 프로파일 에셋의 '자식 에셋'으로 저장해야 파일에 남는다.
+        /// AddObjectToAsset 을 빼먹으면 에디터를 껐다 켤 때 설정이 사라진다.
+        /// </summary>
+        static T Effect<T>(VolumeProfile profile) where T : VolumeComponent
+        {
+            if (profile.TryGet(out T existing)) return existing;
+
+            T created = profile.Add<T>(true);
+            created.hideFlags = HideFlags.HideInHierarchy | HideFlags.HideInInspector;
+            AssetDatabase.AddObjectToAsset(created, profile);
+            return created;
+        }
+
+        /// <summary>
+        /// 값을 넣으면서 '이 항목을 덮어쓴다' 체크도 같이 켠다.
+        /// overrideState 를 켜지 않으면 값만 바뀌고 화면에는 반영되지 않는다 — 흔한 함정이다.
+        /// </summary>
+        static void Set<T>(VolumeParameter<T> parameter, T value)
+        {
+            parameter.overrideState = true;
+            parameter.value = value;
         }
 
         // ------------------------------------------------------------ 유틸
