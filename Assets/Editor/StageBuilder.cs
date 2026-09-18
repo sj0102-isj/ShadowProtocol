@@ -2438,7 +2438,11 @@ namespace Stealth.EditorTools
             },
             droneRoutes = new[]
             {
-                new[] { new Vector2Int(5, 3), new Vector2Int(5, 15) },     // 좌측 세로
+                // 좌측 세로. 남쪽(5,15)에서 출발하는 순서인 것이 중요하다.
+                // 북쪽(5,3)에서 출발하면 시작 지점 P(2,2)와 6.3m 밖에 안 떨어져 있어,
+                // 탐지 반경 4m 에 여유가 2.3m 뿐이다. 한 걸음만 잘못 디디면 시작하자마자 잡힌다.
+                // 순서를 뒤집으면 출발 시점 거리가 26.7m 가 되고 경로 길이는 그대로다.
+                new[] { new Vector2Int(5, 15), new Vector2Int(5, 3) },     // 좌측 세로
                 new[] { new Vector2Int(16, 3), new Vector2Int(16, 15) },   // 우측 세로
             },
         };
