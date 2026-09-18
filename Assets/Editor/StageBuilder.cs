@@ -2367,11 +2367,10 @@ namespace Stealth.EditorTools
             },
             droneRoutes = new[]
             {
-                // 1급 기밀(25,13)과 두꺼비집(26,13) 바로 위는 지나지 않게 비켜 놓았다.
-                // 드론까지 겹치면 중앙이 어려운 게 아니라 불가능해진다.
-                new[] { new Vector2Int(22, 3),  new Vector2Int(22, 21) },  // 남북 축
-                new[] { new Vector2Int(45, 16), new Vector2Int(11, 16) },  // 동서 축
-                new[] { new Vector2Int(7, 2),   new Vector2Int(41, 2) },   // 북쪽 순환로
+                // 복도 두 줄(row 6, row 13)을 각각 가로지른다. 방 안이 아니라 복도를 맡기는
+                // 이유는, 방은 경비가 지키고 복도는 드론이 지켜야 우회로가 생기기 때문이다.
+                new[] { new Vector2Int(2, 6), new Vector2Int(22, 6) },    // 상단 복도
+                new[] { new Vector2Int(22, 13), new Vector2Int(2, 13) },  // 하단 복도
             },
         };
 
