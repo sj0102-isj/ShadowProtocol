@@ -37,6 +37,29 @@ namespace Stealth
         public float acceleration = 22f;        // 최고 속도에 도달하는 빠르기. 클수록 즉각적으로 움직인다
         public float turnSpeedDeg = 900f;       // 몸이 도는 속도 (초당 각도). 900이면 거의 즉시 돈다
 
+        [Header("Dash")]
+        //
+        // 잠입 게임에 "빠르게 움직이는 수단"을 넣을 때 가장 위험한 것은 대시가
+        // 그냥 더 빠른 걷기가 되는 것이다. 그러면 계속 누르는 게 최적해가 된다.
+        // 세 가지로 막았다.
+        //
+        //   1. 거리를 짧게    1.3칸. 경비 시야 하나를 통째로 가로지를 수 없다
+        //   2. 쿨다운을 길게  3.5초. 한 상황에 한 번 쓰는 카드가 된다
+        //   3. 소리를 낸다    근처 경비가 듣고 확인하러 온다. 공짜 속도가 아니다
+        //
+        // 발각은 "보이면 즉시"라 속도로 시야를 뚫을 수는 없다. 대시가 쓸모 있는 곳은
+        // 정전 10초 안에 거리를 벌거나, 순찰이 지나간 직후의 빈 구간을 빨리 건너는 상황이다.
+        [Tooltip("한 번에 가는 거리(m). 격자 한 칸이 2m 이므로 2.6 은 1.3칸이다.")]
+        public float dashDistance = 2.6f;
+        [Tooltip("그 거리를 가는 데 걸리는 시간(초). 짧을수록 순간적으로 느껴진다.")]
+        public float dashDuration = 0.14f;
+        [Tooltip(
+            "다시 쓸 수 있게 되기까지의 시간(초). 쓴 순간부터 센다.\n" +
+            "짧으면 계속 눌러도 되는 '빠른 걷기' 가 되고, 길수록 '언제 쓸까' 를 고르는 카드가 된다.")]
+        public float dashCooldown = 5f;
+        [Tooltip("대시 소리가 퍼지는 반경(m). 동전(24m)보다 훨씬 작아 근처 경비만 듣는다.")]
+        public float dashNoiseRadius = 7f;
+
         [Header("Noise")]
         [Tooltip("걸을 때 발소리가 퍼지는 반경(m). 0이면 무소음.")]
         public float walkNoiseRadius = 0f;      // 0 = 발소리 기능이 꺼져 있다는 뜻
@@ -58,6 +81,35 @@ namespace Stealth
 
         /// <summary>C를 눌러 낮게 긴 상태. 크롤 통로를 지날 수 있다.</summary>
         public bool IsCrawling { get; private set; }
+
+        /// <summary>대시하는 중인가. HUD 와 연출이 읽는다.</summary>
+        public bool IsDashing => dashLeft > 0f;
+
+        /// <summary>지금 대시를 쓸 수 있는가.</summary>
+        public bool DashReady => dashCooldownLeft <= 0f && !IsCrawling && !IsHidden;
+
+        /// <summary>
+        /// 오른쪽 아래 게이지에 쓰는 값. 0 ~ 1.
+        ///
+        ///   준비됨        1 (가득)
+        ///   대시를 쓴 뒤  1 에서 시작해 쿨다운 시간 동안 0 까지 줄어든다
+        ///   0 에 닿으면   다시 1 이 되고 쓸 수 있게 된다
+        ///
+        /// 차오르는 대신 줄어드는 모양으로 만든 이유: 쓴 직후에 무언가 소모됐다는 느낌이
+        /// 빈 게이지가 채워지는 것보다 즉시 읽힌다. 다 줄어든 순간 가득 차므로
+        /// "가득 = 쓸 수 있음" 이라는 규칙도 깨지지 않는다.
+        /// </summary>
+        public float DashCharge => dashCooldownLeft <= 0f || dashCooldown <= 0f
+            ? 1f
+            : Mathf.Clamp01(dashCooldownLeft / dashCooldown);
+
+        /// <summary>쿨다운이 몇 초 남았나. HUD 에 숫자로 같이 띄운다.</summary>
+        public float DashCooldownSeconds => Mathf.Max(0f, dashCooldownLeft);
+
+        float dashLeft;            // 대시가 끝나기까지 남은 시간
+        float dashCooldownLeft;    // 다시 쓸 수 있기까지 남은 시간
+        Vector3 dashDirection;     // 대시 중에는 이 방향으로만 간다
+        bool shiftHeld;            // 지난 프레임에 Shift 가 눌려 있었나
 
         /// <summary>지금 움직이고 있는가. 발소리를 낼지 판단할 때 쓴다.</summary>
         public bool IsMoving { get; private set; }
@@ -140,6 +192,10 @@ namespace Stealth
             // return 은 "이 함수를 여기서 끝낸다"는 뜻이라 아래 코드가 실행되지 않는다.
             if (gm != null && (gm.State != MissionState.Playing || gm.CaptureSequenceActive)) return;
 
+            // 쿨다운은 숨어 있을 때도 흘러야 한다. TickMoving 안에서만 깎으면
+            // 통 안에 숨은 동안 게이지가 멈춰서 고장난 것처럼 보인다.
+            TickDashTimers();
+
             // 상태 기계(state machine). 숨어 있을 때와 아닐 때 하는 일이 완전히 다르다.
             if (IsHidden)
             {
@@ -171,11 +227,22 @@ namespace Stealth
             Vector3 wish = ScreenToWorldDirection(moveInput);
             float targetSpeed = IsCrawling ? crawlSpeed : walkSpeed;
 
-            // 목표 속도로 순간이동시키지 않고 조금씩 다가가게 한다. 그래야 움직임이 부드럽다.
-            // Time.deltaTime = 지난 프레임에서 지금까지 걸린 시간(초).
-            // 이걸 곱해야 프레임이 몇이든 같은 속도로 움직인다. 안 곱하면 좋은 컴퓨터에서 더 빨라진다.
-            currentVelocity = Vector3.MoveTowards(
-                currentVelocity, wish * targetSpeed, acceleration * Time.deltaTime);
+            TryStartDash(wish);
+
+            if (IsDashing)
+            {
+                // 대시 중에는 입력을 무시하고 시작할 때 정한 방향으로만 간다.
+                // 도중에 꺾이게 하면 대시가 '빠른 걷기'가 되어 버린다.
+                currentVelocity = dashDirection * (dashDistance / dashDuration);
+            }
+            else
+            {
+                // 목표 속도로 순간이동시키지 않고 조금씩 다가가게 한다. 그래야 움직임이 부드럽다.
+                // Time.deltaTime = 지난 프레임에서 지금까지 걸린 시간(초).
+                // 이걸 곱해야 프레임이 몇이든 같은 속도로 움직인다. 안 곱하면 좋은 컴퓨터에서 더 빨라진다.
+                currentVelocity = Vector3.MoveTowards(
+                    currentVelocity, wish * targetSpeed, acceleration * Time.deltaTime);
+            }
 
             // 입력이 있을 때만 몸을 돌린다. 입력이 없을 때 돌리면 방향이 0이라 계산이 깨진다.
             if (wish.sqrMagnitude > 0.0001f)
@@ -392,6 +459,65 @@ namespace Stealth
                 // 숨어 있을 때는 코 막대를 꺼서 통 밖으로 삐져나오지 않게 한다.
                 facingMarker.gameObject.SetActive(!IsHidden);
             }
+        }
+
+        /// <summary>
+        /// Shift 대시. 쿨다운을 깎고, 눌린 순간이면 대시를 시작한다.
+        ///
+        /// 방향은 입력이 있으면 입력 쪽, 없으면 지금 보는 쪽이다.
+        /// 입력이 없을 때 못 쓰게 하면 "가만히 서 있다가 뒤로 빠지기"가 안 되어 답답하다.
+        /// </summary>
+        /// <summary>대시와 쿨다운 타이머를 깎는다. 숨어 있든 아니든 매 프레임 돈다.</summary>
+        void TickDashTimers()
+        {
+            if (dashLeft > 0f)
+            {
+                dashLeft -= Time.deltaTime;
+
+                // 대시가 끝나는 순간 속도를 걷는 속도까지 끌어내린다.
+                //
+                // 이걸 안 하면 대시 속도(2.6m / 0.14초 = 18.6 m/s)가 그대로 남고,
+                // MoveTowards 가 가속도 22/s 로 그걸 깎는 데 0.85초가 걸린다.
+                // 그동안 약 8 m 를 더 미끄러져서 대시 거리가 체감상 네 배로 느껴진다.
+                if (dashLeft <= 0f) currentVelocity = Vector3.ClampMagnitude(currentVelocity, walkSpeed);
+            }
+
+            if (dashCooldownLeft > 0f) dashCooldownLeft -= Time.deltaTime;
+        }
+
+        void TryStartDash(Vector3 wish)
+        {
+            // 눌린 순간만 잡는다. isPressed 만 보면 누르고 있는 동안 계속 발동한다.
+            var kb = Keyboard.current;
+            bool down = kb != null && (kb.leftShiftKey.isPressed || kb.rightShiftKey.isPressed);
+            bool pressed = down && !shiftHeld;
+            shiftHeld = down;
+
+            if (!pressed) return;
+
+            // 연타로 두 번 나가는 것을 막는 곳.
+            //
+            // dashCooldownLeft 는 아래에서 대시를 시작하는 그 프레임에 곧바로 쿨다운 전체로
+            // 채워진다. 그래서 다음 프레임에 또 눌러도 DashReady 가 false 라 통과하지 못한다.
+            // IsDashing 검사는 그보다 짧은 창(대시가 진행 중인 0.14초)을 한 번 더 막는다.
+            // 둘 다 "게이지가 가득일 때만 나간다" 는 같은 규칙을 보는 것이라 어긋날 일이 없다.
+            if (!DashReady || IsDashing) return;
+
+            Vector3 dir = wish.sqrMagnitude > 0.0001f ? wish.normalized : transform.forward;
+            dir.y = 0f;
+            if (dir.sqrMagnitude < 0.0001f) return;
+
+            dashDirection = dir.normalized;
+            dashLeft = dashDuration;
+            dashCooldownLeft = dashCooldown;
+
+            // 몸을 즉시 그쪽으로 돌린다. 옆으로 미끄러지는 것처럼 보이면 안 된다.
+            transform.rotation = Quaternion.LookRotation(dashDirection, Vector3.up);
+
+            GameAudio.Play(Sfx.Dash);
+
+            // 소리를 낸다. 이것이 대시의 대가다. 근처 경비가 듣고 확인하러 온다.
+            NoiseSystem.Emit(transform.position, dashNoiseRadius, 1f);
         }
 
         /// <summary>

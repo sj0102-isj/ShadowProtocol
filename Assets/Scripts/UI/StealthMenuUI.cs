@@ -36,6 +36,7 @@ namespace Stealth
         static readonly (string key, string action)[] ControlRows =
         {
             ("W A S D", "이동"),
+            ("Shift", "짧게 대시 — 소리가 나므로 근처 경비가 듣고 확인하러 온다"),
             ("C", "낮게 기기 — 크롤 통로를 지나고, 그 아래에서는 안 보인다"),
             ("Q", "동전 던지기 — 커서 위치로 던져 경비를 유인"),
             ("F", "두꺼비집 — 10초간 정전, 완전히 안 보인다"),

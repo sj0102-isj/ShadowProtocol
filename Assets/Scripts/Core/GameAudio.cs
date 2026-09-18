@@ -7,6 +7,7 @@ namespace Stealth
     {
         Footstep,       // 걸을 때 발소리
         FootstepCrawl,  // 기어갈 때 발소리 (더 낮고 조용하게)
+        Dash,           // Shift 대시
         CoinThrow,      // 동전을 던지는 순간
         CoinLand,       // 동전이 바닥·벽에 부딪히는 순간
         Collect,        // 기밀 자료 회수
@@ -171,6 +172,8 @@ namespace Stealth
             //                                                                     부드럽게  음량
             Reg(Sfx.Footstep,      "Footstep",      Step(0.35f, 0.22f, 105f),         0.30f, 0.260f);
             Reg(Sfx.FootstepCrawl, "FootstepCrawl", Step(0.22f, 0.08f, 72f),          0.45f, 0.148f);
+            // 대시. 동전 던지기와 같은 바람 소리지만 더 길고 굵게 — 몸이 움직이는 소리다.
+            Reg(Sfx.Dash,          "Dash",          Whoosh(0.26f, 0.04f, 0.18f),      0.14f, 0.300f);
             Reg(Sfx.CoinThrow,     "CoinThrow",     Whoosh(0.20f, 0.05f, 0.22f),      0.16f, 0.157f);
             Reg(Sfx.CoinLand,      "CoinLand",      Metal(),                          0.35f, 0.428f);
             Reg(Sfx.Collect,       "Collect",       Notes(Hz(523, 659, 784),
