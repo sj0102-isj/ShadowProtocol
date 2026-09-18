@@ -1033,10 +1033,17 @@ namespace Stealth.EditorTools
             cc.slopeLimit = 45f;
             cc.stepOffset = 0.3f;
 
-            // 도둑. 짙은 남색 상하의에 흰 줄무늬, 눈만 내놓은 검은 복면.
-            // 너무 어두우면 어두운 바닥에 묻혀서 눈이 없으면 못 찾는다. 도둑 느낌은 유지하되
-            // 바닥(0.17)보다는 확실히 밝은 값으로 잡았다.
-            Material mat = MaterialFor("Actor_Player", new Color(0.26f, 0.30f, 0.48f));
+            // 도둑. 어두운 자주색 상하의에 흰 줄무늬, 눈만 내놓은 검은 복면.
+            //
+            // 왜 자주색인가: 처음에는 짙은 남색(0.26, 0.30, 0.48)이었는데 경찰(0.20, 0.27, 0.47)과
+            // 거의 같은 색이었다. 쿼터뷰는 위에서 내려다보므로 화면에서 가장 크게 보이는 것이
+            // 몸통인데, 그 몸통이 구분이 안 되면 멀리 있는 경비를 자기 캐릭터로 착각한다.
+            //
+            // 남은 색이 자주색밖에 없었다. 파랑·하늘색은 경찰·드론·크롤 표시·발밑 링이 쓰고,
+            // 초록은 탈출구와 순찰 콘, 노랑은 동전·레버, 갈색은 선반, 빨강은 발각이다.
+            //
+            // 밝기는 바닥(0.17)보다 확실히 위로 잡는다. 너무 어두우면 눈이 없으면 못 찾는다.
+            Material mat = MaterialFor("Actor_Player", new Color(0.36f, 0.26f, 0.40f));
 
             var body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             body.name = "Body";
@@ -1229,9 +1236,12 @@ namespace Stealth.EditorTools
             agent.stoppingDistance = 0.15f;
             agent.autoBraking = true;
 
-            // 경찰. 남색 제복에 하늘색 견장 줄무늬, 챙 달린 정모.
-            // 도둑(짙은 남색 + 흰 줄)과 색이 비슷하지만 모자와 줄 색으로 구분된다.
-            Material mat = MaterialFor("Actor_Guard", new Color(0.20f, 0.27f, 0.47f));
+            // 경찰. 파란 제복에 하늘색 견장 줄무늬, 챙 달린 정모.
+            //
+            // 도둑을 자주색으로 뺐으므로 이쪽은 파랑을 더 선명하게 가져간다.
+            // 드론(0.26, 0.32, 0.44)도 파란 계열이지만 그쪽은 채도가 낮은 회청색이고
+            // 고도 4.5 m 를 날아다녀서 헷갈리지 않는다.
+            Material mat = MaterialFor("Actor_Guard", new Color(0.17f, 0.33f, 0.66f));
 
             var body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             body.name = "Body";

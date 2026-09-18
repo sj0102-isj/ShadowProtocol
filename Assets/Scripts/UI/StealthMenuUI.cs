@@ -79,6 +79,23 @@ namespace Stealth
         Rect backButton;
         Rect closeButton;
         Rect unlockButton;
+
+        /// <summary>
+        /// 전체 해금 버튼을 보일지.
+        ///
+        /// 시연·녹화용으로 만든 버튼이라 배포판에는 있으면 안 된다. 잠금이 의미가 없어진다.
+        /// 그렇다고 빌드할 때마다 코드를 고치면 반드시 한 번은 빼먹는다.
+        ///
+        /// 그래서 유니티가 이미 갖고 있는 스위치에 얹었다 —
+        /// <b>빌드 설정의 [Development Build] 체크</b> 하나로 정해진다.
+        ///
+        ///   에디터                 보임
+        ///   Development Build      보임   (내가 테스트할 때)
+        ///   그냥 Build             숨김   (남에게 주는 것)
+        ///
+        /// 같은 소스로 두 가지 빌드가 나오므로 브랜치를 나누거나 커밋을 따로 할 필요가 없다.
+        /// </summary>
+        static bool ShowUnlockAll => Application.isEditor || Debug.isDebugBuild;
         Rect[] stageCards = new Rect[0];
 
         GUIStyle titleStyle, subtitleStyle, buttonStyle, headingStyle, bodyStyle, mutedStyle, keyStyle;
@@ -87,9 +104,36 @@ namespace Stealth
         /// <summary>결과 화면에서 "스테이지 선택"을 눌렀을 때 호출된다.</summary>
         public void OpenStageSelect()
         {
-            screen = MenuScreen.StageSelect;
+            SetScreen(MenuScreen.StageSelect);
             StealthGameManager.Instance?.OpenMenu();
         }
+
+        /// <summary>
+        /// 화면을 바꾼다. 이때 <b>지금 눌려 있는 클릭을 먹어치우는 것</b>이 핵심이다.
+        ///
+        /// 타이틀의 [시작] 과 일시정지의 [스테이지 선택으로] 는 화면 한가운데 있는데,
+        /// 스테이지 선택 화면에서는 바로 그 자리에 STAGE 04 카드가 놓인다.
+        ///
+        ///   [시작]              viewH*0.5 + 30 ~ +88
+        ///   STAGE 04 카드       viewH*0.5 + 20.5 ~ +98.5   ← 버튼이 통째로 들어간다
+        ///
+        /// 버튼을 누른 손가락이 아직 떨어지지 않았는데 화면이 바뀌면, 그 클릭이 새 화면의
+        /// 같은 자리에 있는 카드로 이어져 4스테이지로 그냥 들어가 버린다.
+        ///
+        /// 화면을 바꾸는 순간 "이미 눌려 있던 것"으로 표시해 두면, 한 번 떼었다 다시
+        /// 눌러야 다음 입력이 먹는다. 버튼 위치를 옮기는 것보다 이쪽이 확실하다.
+        /// 어떤 화면을 어떻게 배치하든 같은 사고가 다시 나지 않기 때문이다.
+        /// </summary>
+        void SetScreen(MenuScreen next)
+        {
+            screen = next;
+            mouseHeld = true;
+        }
+
+        // 지난 프레임에 왼쪽 버튼이 눌려 있었나.
+        // wasPressedThisFrame 대신 직접 비교하는 이유는 위 SetScreen 에서 이 값을
+        // 조작해 클릭 하나를 통째로 없던 일로 만들기 위해서다.
+        bool mouseHeld;
 
         // ------------------------------------------------------------ 입력
 
@@ -111,7 +155,7 @@ namespace Stealth
             {
                 if (!gm.CaptureSequenceActive && kb != null && kb.escapeKey.wasPressedThisFrame)
                 {
-                    screen = MenuScreen.Paused;
+                    SetScreen(MenuScreen.Paused);
                     gm.OpenMenu();
                 }
                 return;
@@ -123,14 +167,20 @@ namespace Stealth
 
             if (kb != null && kb.escapeKey.wasPressedThisFrame)
             {
-                if (screen == MenuScreen.Controls) screen = controlsReturnTo;
+                if (screen == MenuScreen.Controls) SetScreen(controlsReturnTo);
                 else if (screen == MenuScreen.Paused) gm.Resume();
-                else if (screen == MenuScreen.StageSelect) screen = MenuScreen.Title;
+                else if (screen == MenuScreen.StageSelect) SetScreen(MenuScreen.Title);
                 return;
             }
 
             var m = Mouse.current;
-            if (m == null || !m.leftButton.wasPressedThisFrame) return;
+            if (m == null) return;
+
+            // 눌린 순간을 직접 잡는다. 지난 프레임에 안 눌려 있다가 지금 눌려 있으면 새 클릭이다.
+            bool down = m.leftButton.isPressed;
+            bool pressed = down && !mouseHeld;
+            mouseHeld = down;
+            if (!pressed) return;
 
             // 메뉴에서 왼쪽 버튼을 누르면 짧게 딸깍 소리를 낸다.
             // 버튼을 정확히 맞혔는지까지 보지는 않는다. 버튼마다 소리를 넣으려면
@@ -141,11 +191,11 @@ namespace Stealth
             switch (screen)
             {
                 case MenuScreen.Title:
-                    if (startButton.Contains(mouse)) screen = MenuScreen.StageSelect;
+                    if (startButton.Contains(mouse)) SetScreen(MenuScreen.StageSelect);
                     else if (controlsButton.Contains(mouse))
                     {
                         controlsReturnTo = MenuScreen.Title;
-                        screen = MenuScreen.Controls;
+                        SetScreen(MenuScreen.Controls);
                     }
                     break;
 
@@ -157,29 +207,29 @@ namespace Stealth
                         gm.LoadStage(StageCatalog.Stages[i]);
                         return;
                     }
-                    if (unlockButton.Contains(mouse))
+                    if (ShowUnlockAll && unlockButton.Contains(mouse))
                     {
                         StageProgress.UnlockAll = !StageProgress.UnlockAll;
                     }
                     else if (controlsButton.Contains(mouse))
                     {
                         controlsReturnTo = MenuScreen.StageSelect;
-                        screen = MenuScreen.Controls;
+                        SetScreen(MenuScreen.Controls);
                     }
-                    else if (backButton.Contains(mouse)) screen = MenuScreen.Title;
+                    else if (backButton.Contains(mouse)) SetScreen(MenuScreen.Title);
                     break;
 
                 case MenuScreen.Controls:
-                    if (closeButton.Contains(mouse)) screen = controlsReturnTo;
+                    if (closeButton.Contains(mouse)) SetScreen(controlsReturnTo);
                     break;
 
                 case MenuScreen.Paused:
                     if (resumeButton.Contains(mouse)) gm.Resume();
-                    else if (stageSelectButton.Contains(mouse)) screen = MenuScreen.StageSelect;
+                    else if (stageSelectButton.Contains(mouse)) SetScreen(MenuScreen.StageSelect);
                     else if (controlsButton.Contains(mouse))
                     {
                         controlsReturnTo = MenuScreen.Paused;
-                        screen = MenuScreen.Controls;
+                        SetScreen(MenuScreen.Controls);
                     }
                     break;
             }
@@ -330,8 +380,9 @@ namespace Stealth
                 DrawStageCard(StageCatalog.Stages[i], stageCards[i]);
             }
 
-            DrawButton(unlockButton, StageProgress.UnlockAll ? "해금 해제" : "전체 해금", true,
-                StageProgress.UnlockAll ? new Color(1f, 0.8f, 0.3f) : new Color(0.5f, 0.55f, 0.62f));
+            if (ShowUnlockAll)
+                DrawButton(unlockButton, StageProgress.UnlockAll ? "해금 해제" : "전체 해금", true,
+                    StageProgress.UnlockAll ? new Color(1f, 0.8f, 0.3f) : new Color(0.5f, 0.55f, 0.62f));
             DrawButton(backButton, "뒤로", true, new Color(0.6f, 0.68f, 0.78f));
             DrawButton(controlsButton, "조작키", true, new Color(0.6f, 0.68f, 0.78f));
         }
