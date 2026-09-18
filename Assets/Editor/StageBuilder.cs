@@ -373,7 +373,10 @@ namespace Stealth.EditorTools
             top.name = "Cap";
             top.transform.SetParent(wall, false);
             top.transform.localPosition = new Vector3(0f, 0.43f, 0f);
-            top.transform.localScale = new Vector3(1.01f, 0.12f, 1.03f);
+            // X 는 정확히 1. 부모 길이에 비례하는 값(1.01)을 주면 40 m 짜리 벽에서
+            // 양 끝으로 20 cm 씩 삐져나온다. 맵 가장자리에서는 그게 허공에 걸린다.
+            // 벽면에서 떠 보이게 하는 데 필요한 것은 Z 방향뿐이다.
+            top.transform.localScale = new Vector3(1f, 0.12f, 1.03f);
             StripCollider(top);
             top.GetComponent<Renderer>().sharedMaterial = cap;
 
@@ -382,7 +385,7 @@ namespace Stealth.EditorTools
             belt.name = "Line";
             belt.transform.SetParent(wall, false);
             belt.transform.localPosition = new Vector3(0f, -0.10f, 0f);
-            belt.transform.localScale = new Vector3(1.01f, 0.035f, 1.02f);
+            belt.transform.localScale = new Vector3(1f, 0.035f, 1.02f);
             StripCollider(belt);
             belt.GetComponent<Renderer>().sharedMaterial = line;
 
@@ -391,7 +394,7 @@ namespace Stealth.EditorTools
             skirt.name = "Skirt";
             skirt.transform.SetParent(wall, false);
             skirt.transform.localPosition = new Vector3(0f, -0.44f, 0f);
-            skirt.transform.localScale = new Vector3(1.01f, 0.10f, 1.02f);
+            skirt.transform.localScale = new Vector3(1f, 0.10f, 1.02f);
             StripCollider(skirt);
             skirt.GetComponent<Renderer>().sharedMaterial = cap;
         }
@@ -412,7 +415,7 @@ namespace Stealth.EditorTools
                 plank.name = "Board";
                 plank.transform.SetParent(shelf, false);
                 plank.transform.localPosition = new Vector3(0f, y, 0f);
-                plank.transform.localScale = new Vector3(1.005f, 0.055f, 1.06f);
+                plank.transform.localScale = new Vector3(1f, 0.055f, 1.06f);
                 StripCollider(plank);
                 plank.GetComponent<Renderer>().sharedMaterial = board;
             }
@@ -629,10 +632,38 @@ namespace Stealth.EditorTools
         /// 칸마다 네모를 놓으면 47x25 = 1175개가 되므로, 줄 하나를 통으로 긋는다.
         /// 가로 26줄 + 세로 48줄 = 74개면 끝난다.
         /// </summary>
+        /// <summary>
+        /// 맵 바깥 바닥. 벽 밖이 곧장 검은 허공이면 맵이 공중에 뜬 판처럼 보인다.
+        ///
+        /// 새 에셋이 필요 없다. 이미 켜 둔 선형 안개(26~85 m)가 먼 쪽을 배경색으로
+        /// 지워 주므로, 어두운 판 하나를 넓게 깔기만 하면 가장자리가 자연스럽게 사라진다.
+        ///
+        /// 바닥보다 0.25 m 낮게 두는 이유: 같은 높이면 밖도 걸어 다닐 수 있는 바닥처럼
+        /// 보인다. 한 단 내려 두면 '건물 밖 지면' 으로 읽힌다.
+        ///
+        /// BuildFloorDetail 안에서 부르는 이유는 이 함수가 NavMesh 베이크 뒤에
+        /// 실행되기 때문이다. 베이크 전에 만들면 이 판이 지형으로 잡혀 맵 밖에도
+        /// 경비가 걸어 다닐 수 있는 영역이 생긴다.
+        /// </summary>
+        static void BuildSurround(Transform parent, int width, int height)
+        {
+            const float Margin = 16f;   // 맵 경계에서 바깥으로 더 까는 거리(m)
+
+            var ground = CreateBox(parent, "Surround",
+                new Vector3(0f, -0.35f, 0f),
+                new Vector3(width * Cell + Margin * 2f, 0.2f, height * Cell + Margin * 2f),
+                MaterialFor("Greybox_Surround", new Color(0.085f, 0.095f, 0.125f)));
+
+            StripCollider(ground);   // 밟을 일이 없고, 레이캐스트에 걸리면 시야 판정이 꼬인다
+            ground.isStatic = true;
+        }
+
         static void BuildFloorDetail(Transform parent, int width, int height)
         {
             var root = new GameObject("FloorDetail").transform;
             root.SetParent(parent, false);
+
+            BuildSurround(root, width, height);
 
             // 바닥(0.17, 0.18, 0.21)과 충분히 차이가 나야 선으로 보인다.
             // 처음엔 0.23 으로 뒀는데 있는 줄도 모를 만큼 흐려서 올렸다.
