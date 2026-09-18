@@ -277,10 +277,20 @@ namespace Stealth.EditorTools
 
         static void BuildFloor(Transform parent, int width, int height)
         {
+            // 텍스처(체커)를 쓰므로 색은 흰색으로 둔다.
+            // URP 는 _BaseColor 와 텍스처를 곱하기 때문에, 예전처럼 어두운 색을 그대로 두면
+            // 어두운 텍스처 × 어두운 색 = 거의 검정이 되어 무늬가 보이지 않는다.
+            // 텍스처 자체가 이미 어두운 회색(약 0.18)이라 흰색을 곱하면 예전 밝기와 비슷해진다.
             var floor = CreateBox(parent, "Floor",
                 new Vector3(0f, -0.1f, 0f),
                 new Vector3(width * Cell, 0.2f, height * Cell),
-                MaterialFor("Greybox_Floor", new Color(0.17f, 0.18f, 0.21f)));
+                MaterialFor("Greybox_Floor", Color.white,
+                            "Universal Render Pipeline/Lit", "dark_texture_08.png"));
+
+            // 체커 한 칸이 격자 한 칸(2 m)과 정확히 맞도록 반복 횟수를 정한다.
+            // 텍스처 한 장에 체커가 4×4 이므로 8 m 마다 한 장이면 체커 하나가 2 m 가 된다.
+            SetTiling(floor, width * Cell / 8f, height * Cell / 8f);
+
             floor.isStatic = true;
         }
 
@@ -1977,8 +1987,41 @@ namespace Stealth.EditorTools
         /// 같은 회색 벽이 스테이지마다 다른 머티리얼이 된다. 에셋으로 저장해 두면
         /// 여섯 스테이지가 같은 머티리얼 하나를 공유하고, 색을 바꾸면 전부 한 번에 바뀐다.
         /// </summary>
+        /// <summary>
+        /// 이 오브젝트에만 텍스처 반복 횟수를 지정한다.
+        ///
+        /// 머티리얼에 직접 넣으면 안 되는 이유: 머티리얼 하나를 여섯 스테이지가 함께 쓴다.
+        /// 25×17 창고와 49×27 아카이브가 같은 반복 횟수를 쓰면 한쪽이 늘어나 보인다.
+        /// MaterialPropertyBlock 은 머티리얼을 복제하지 않고 이 렌더러에만 값을 덮어쓴다.
+        /// </summary>
+        static void SetTiling(GameObject go, float u, float v)
+        {
+            var renderer = go.GetComponent<Renderer>();
+            if (renderer == null) return;
+
+            var block = new MaterialPropertyBlock();
+            renderer.GetPropertyBlock(block);
+            block.SetVector(BaseMapStId, new Vector4(u, v, 0f, 0f));
+            renderer.SetPropertyBlock(block);
+        }
+
+        // _BaseMap_ST = 텍스처의 (가로 반복, 세로 반복, 가로 밀기, 세로 밀기).
+        // 이름으로 매번 찾으면 느려서 정수 ID 로 한 번만 바꿔 둔다.
+        static readonly int BaseMapStId = Shader.PropertyToID("_BaseMap_ST");
+
+        /// <summary>
+        /// Assets/Textures 아래에서 텍스처를 읽는다. 없으면 null 을 돌려주고,
+        /// 그러면 머티리얼은 색만 쓰는 예전 모습 그대로가 된다(텍스처가 없어도 안 깨진다).
+        /// </summary>
+        static Texture2D TextureAt(string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName)) return null;
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(
+                $"Assets/Textures/Kenney_PrototypeTextures/Dark/{fileName}");
+        }
+
         static Material MaterialFor(string name, Color color,
-            string shaderName = "Universal Render Pipeline/Lit")
+            string shaderName = "Universal Render Pipeline/Lit", string textureFile = null)
         {
             const string dir = "Assets/Materials";
             if (!AssetDatabase.IsValidFolder(dir)) AssetDatabase.CreateFolder("Assets", "Materials");
@@ -2003,6 +2046,10 @@ namespace Stealth.EditorTools
 
             mat.SetColor("_BaseColor", color);
             if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.08f);
+
+            // 텍스처는 매번 다시 지정한다. 인자를 빼면 null 이 들어가 예전 모습으로 되돌아간다.
+            if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", TextureAt(textureFile));
+
             EditorUtility.SetDirty(mat);
 
             return mat;
