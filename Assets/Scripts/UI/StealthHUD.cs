@@ -121,7 +121,6 @@ namespace Stealth
             DrawMissionPanel(gm);
             DrawAwareness();
             DrawWorldPrompts();
-            DrawObjectiveArrow();
             DrawDashGauge();
             DrawControlHint();
             DrawRespawnNotice(gm);
@@ -308,109 +307,6 @@ namespace Stealth
         /// 화면 하단 한 곳에 몰아서 띄우면 "무엇에 대한 안내인지"가 안 보이기 때문에
         /// 대상의 머리 위, 즉 월드 좌표를 화면으로 투영한 자리에 붙인다.
         /// </summary>
-        /// <summary>
-        /// 화면 밖에 있는 가장 가까운 자료의 방향을 가장자리 화살표로 알려준다.
-        ///
-        /// 왜 필요한가: 무한모드 맵은 49x27 이라 화면에 한 번에 다 안 들어온다.
-        /// 자료가 어디 있는지 모르면 빈 복도를 헤매게 되는데, 그 시간은 재미도 없고
-        /// 영상으로 찍어도 지루하다. 방향만 알려주면 "어떻게 갈까"라는 판단은 그대로 남는다.
-        ///
-        /// 화면 안에 있으면 그리지 않는다. 이미 보이는 것에 화살표를 얹으면 가릴 뿐이다.
-        /// </summary>
-        void DrawObjectiveArrow()
-        {
-            if (cam == null) cam = Camera.main;
-            if (cam == null || player == null) return;
-
-            // 가장 가까운 것 하나만. 전부 그리면 화면 가장자리가 화살표로 도배된다.
-            Objective target = null;
-            float best = float.MaxValue;
-            foreach (var objective in Objective.All)
-            {
-                if (objective == null || objective.Collected) continue;
-                float d = (objective.transform.position - player.transform.position).sqrMagnitude;
-                if (d >= best) continue;
-                best = d;
-                target = objective;
-            }
-            if (target == null) return;
-
-            Vector3 screen = cam.WorldToScreenPoint(target.transform.position);
-
-            // 카메라 뒤에 있으면 좌표가 뒤집혀 나온다. 화면 중심 기준으로 되뒤집어 방향만 살린다.
-            if (screen.z < 0f)
-            {
-                screen.x = Screen.width - screen.x;
-                screen.y = Screen.height - screen.y;
-            }
-
-            float x = screen.x / scale;
-            float y = (Screen.height - screen.y) / scale;   // GUI 는 y 가 아래로 증가한다
-
-            const float margin = 54f;   // 화살표가 화면 밖으로 잘리지 않을 만큼 안쪽
-
-            // 여백 안에 들어와 있으면 눈으로 보이는 것이므로 그리지 않는다.
-            bool onScreen = screen.z > 0f
-                            && x > margin && x < viewW - margin
-                            && y > margin && y < viewH - margin;
-            if (onScreen) return;
-
-            // 가장자리 안쪽으로 끌어당긴 자리에 그린다.
-            var at = new Vector2(Mathf.Clamp(x, margin, viewW - margin),
-                                 Mathf.Clamp(y, margin, viewH - margin));
-
-            // 끌어당기기 전 위치를 향하는 방향. 0도가 위쪽이 되도록 Atan2 인자를 맞췄다.
-            Vector2 dir = new Vector2(x, y) - at;
-            if (dir.sqrMagnitude < 0.0001f) return;
-            float angle = Mathf.Atan2(dir.x, -dir.y) * Mathf.Rad2Deg;
-
-            float meters = Vector3.Distance(player.transform.position, target.transform.position);
-            Color accent = target.points > 1 ? PrizeAccent : KeyAccent;
-
-            Matrix4x4 saved = GUI.matrix;
-            GUIUtility.RotateAroundPivot(angle, at);
-            var tri = new Rect(at.x - 15f, at.y - 17f, 30f, 26f);
-            GUI.color = new Color(accent.r, accent.g, accent.b, 0.92f);
-            GUI.DrawTexture(tri, ArrowTexture);
-            GUI.color = Color.white;
-            GUI.matrix = saved;   // 회전을 반드시 되돌린다. 안 그러면 뒤에 그리는 것이 전부 돌아간다
-
-            GUI.Label(new Rect(at.x - 40f, at.y + 14f, 80f, 20f), $"{meters:0} m",
-                UIKit.Style(12, TextAnchor.MiddleCenter, accent));
-        }
-
-        // 위를 향한 삼각형. 한 번만 만들어 두고 계속 쓴다.
-        // 이미지 파일을 쓰지 않는 이 프로젝트 규칙에 맞춰 픽셀을 직접 찍는다.
-        static Texture2D arrowTexture;
-        static Texture2D ArrowTexture
-        {
-            get
-            {
-                if (arrowTexture != null) return arrowTexture;
-
-                const int size = 32;
-                arrowTexture = new Texture2D(size, size, TextureFormat.RGBA32, false)
-                {
-                    hideFlags = HideFlags.HideAndDontSave,
-                    filterMode = FilterMode.Bilinear,
-                };
-
-                for (int py = 0; py < size; py++)
-                {
-                    // 위(py = size-1)에서 아래로 내려올수록 넓어지는 삼각형.
-                    float t = 1f - py / (float)(size - 1);
-                    float half = t * size * 0.5f;
-                    for (int px = 0; px < size; px++)
-                    {
-                        bool inside = Mathf.Abs(px - (size - 1) * 0.5f) <= half;
-                        arrowTexture.SetPixel(px, py, inside ? Color.white : new Color(1f, 1f, 1f, 0f));
-                    }
-                }
-                arrowTexture.Apply();
-                return arrowTexture;
-            }
-        }
-
         void DrawWorldPrompts()
         {
             if (cam == null) cam = Camera.main;
