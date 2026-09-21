@@ -2300,7 +2300,10 @@ namespace Stealth.EditorTools
                 // 1번 · 시작 지점에서 나오는 첫 복도. 서쪽 세로 복도는 1칸짜리 직선이라
                 //       거기 세우면 혼자서 좌측 전체를 감시해버리고, 짧게 끊으면
                 //       아무도 안 다니는 구석을 지키느라 놀게 된다. 그래서 아예 옮겼다.
-                new[] { new Vector2Int(8, 13), new Vector2Int(12, 13) },
+                // 서쪽 창고. 예전에는 (8,13)-(12,13) 으로 남쪽 통로에 있었는데
+                // 그 통로가 배회형의 구역이라 둘이 같은 자리를 돌았다.
+                new[] { new Vector2Int(2, 5), new Vector2Int(7, 5),
+                        new Vector2Int(7, 9), new Vector2Int(2, 9) },
                 // 2번 · 북동 구역 사각 순찰
                 new[] { new Vector2Int(13, 1), new Vector2Int(22, 1), new Vector2Int(22, 4), new Vector2Int(13, 4) },
                 // 3번 · 동쪽 방 안에서만. 예전엔 1칸짜리 복도(x=18)를 세로로 훑어서
@@ -2355,7 +2358,9 @@ namespace Stealth.EditorTools
                 // 3번 · 하단 중앙 방
                 new[] { new Vector2Int(10, 13), new Vector2Int(14, 13) },
                 // 4번 · 우상단 방
-                new[] { new Vector2Int(18, 3), new Vector2Int(22, 3) },
+                // 북중앙 방. 북동 자료실은 배회형이 맡는 자리라 비켜 줬다.
+                new[] { new Vector2Int(10, 1), new Vector2Int(14, 1),
+                        new Vector2Int(14, 3), new Vector2Int(10, 3) },
             },
             // 배회형 1명 — 북동 자료실. 자료를 지키는 대신 자리가 고정돼 있지 않다.
             roamRoutes = new[]
@@ -2446,8 +2451,10 @@ namespace Stealth.EditorTools
                         new Vector2Int(16, 3), new Vector2Int(10, 3) },   // 상단 자료실
                 new[] { new Vector2Int(3, 8), new Vector2Int(7, 8),
                         new Vector2Int(7, 10), new Vector2Int(3, 10) },   // 좌측 실험실
-                new[] { new Vector2Int(17, 8), new Vector2Int(21, 8),
-                        new Vector2Int(21, 10), new Vector2Int(17, 10) }, // 우측 실험실
+                // 중앙 방. 크롤 통로 두 개가 모이는 길목인데 아무도 안 지키고 있었다.
+                // 우측 실험실은 배회형 자리라 그쪽에서 뺐다.
+                new[] { new Vector2Int(9, 8), new Vector2Int(15, 8),
+                        new Vector2Int(15, 12), new Vector2Int(9, 12) },  // 중앙 방
                 new[] { new Vector2Int(1, 7), new Vector2Int(1, 12) },    // 좌측 세로 연결로
             },
             // 배회형 1명 — 동쪽 실험실. 드론이 복도를 맡고 여기는 사람이 맡는다.
@@ -2515,8 +2522,8 @@ namespace Stealth.EditorTools
             guardRoutes = new[]
             {
                 new[] { new Vector2Int(10, 9), new Vector2Int(17, 9) },    // 가운데 문 지킴
-                new[] { new Vector2Int(3, 13), new Vector2Int(11, 13),
-                        new Vector2Int(11, 15), new Vector2Int(3, 15) },   // 좌하 구역
+                // 서쪽 통로. 두꺼비집(2,9) 앞이다. 남서 구역은 배회형 자리라 비켜 줬다.
+                new[] { new Vector2Int(2, 7), new Vector2Int(2, 10) },   // 좌하 구역
                 new[] { new Vector2Int(18, 2), new Vector2Int(23, 2),
                         new Vector2Int(23, 4), new Vector2Int(18, 4) },    // 우상 금고
                 new[] { new Vector2Int(15, 14), new Vector2Int(15, 16) },  // 우하 금고
@@ -2623,10 +2630,12 @@ namespace Stealth.EditorTools
                 // 북↔남은 y=13 에 대해 완전히 대칭이다.
                 // 서↔동은 대칭을 조금 깼다 — 동을 x=33 에서 시작하면 북 구역(y2~7)과
                 // x33~35 에서 겹쳐서, 같은 자리를 두 명이 동시에 도는 구간이 생긴다.
-                new[] { new Vector2Int(17, 2),  new Vector2Int(35, 7) },    // 북 서고    19x6
-                new[] { new Vector2Int(17, 19), new Vector2Int(35, 24) },   // 남 하역장  19x6
-                new[] { new Vector2Int(2, 6),   new Vector2Int(14, 20) },   // 서 기계실  13x15
-                new[] { new Vector2Int(36, 6),  new Vector2Int(46, 20) },   // 동 사무실  11x15
+                // 네 구역 모두 고정 순찰 한 명과 통째로 겹쳐 있었다. 선반 줄을 경계로
+                // 띠를 나눠, 고정은 한쪽 통로 배회는 반대쪽을 맡는다.
+                new[] { new Vector2Int(17, 2),  new Vector2Int(32, 3) },    // 북 서고 · 북쪽 통로
+                new[] { new Vector2Int(17, 22), new Vector2Int(35, 24) },   // 남 하역장 · 남쪽 통로
+                new[] { new Vector2Int(2, 6),   new Vector2Int(9, 20) },    // 서 기계실 · 서쪽
+                new[] { new Vector2Int(36, 6),  new Vector2Int(46, 11) },   // 동 사무실 · 북쪽
             },
             droneRoutes = new[]
             {
