@@ -169,6 +169,7 @@ namespace Stealth.EditorTools
             var root = new GameObject(RootName);
 
             ValidateGrid(stage);   // 줄 길이가 다르거나 P/E 가 없으면 여기서 경고를 띄운다
+            ValidateGuardRoutes(stage);   // 경비끼리 자리가 겹치면 서로 막고 굳는다
 
             // grid 는 문자열 배열이다. 한 줄의 글자 수가 가로, 줄 수가 세로가 된다.
             int width = stage.grid[0].Length;
@@ -1236,6 +1237,14 @@ namespace Stealth.EditorTools
             agent.stoppingDistance = 0.15f;
             agent.autoBraking = true;
 
+            // 경비마다 회피 우선순위를 다르게 준다.
+            //
+            // 유니티의 지역 회피는 우선순위가 같은 두 에이전트를 대칭으로 다룬다. 서로
+            // 똑같이 비켜서다가 똑같이 되돌아오는 교착이 생기고, 마주 오는 경비 둘이
+            // 좁은 문에서 나란히 굳는다. 숫자가 다르면 낮은 쪽이 먼저 지나가고 끝난다.
+            // (작을수록 우선. 30부터 준 것은 위아래로 여유를 남기려는 것뿐이다)
+            agent.avoidancePriority = 30 + index;
+
             // 경찰. 파란 제복에 하늘색 견장 줄무늬, 챙 달린 정모.
             //
             // 도둑을 자주색으로 뺐으므로 이쪽은 파랑을 더 선명하게 가져간다.
@@ -1968,6 +1977,85 @@ namespace Stealth.EditorTools
         }
 
         /// <summary>
+        /// 경비들이 서로를 막을 자리에 세워져 있지 않은지 검사한다.
+        ///
+        /// 두 경비가 같은 칸에 서려고 하면 지역 회피가 서로를 밀어내서 둘 다 도착하지
+        /// 못한다. 순찰은 도착해야만 다음 지점으로 넘어가므로 그대로 굳는다.
+        /// GuardAI.StuckTooLong 이 몇 초 뒤에 풀어 주기는 하지만, 애초에 그런 자리를
+        /// 만들지 않는 편이 낫다 — 풀리기 전까지 그 구역은 비어 있는 것과 같다.
+        ///
+        /// 무한모드 중앙 열람홀이 이 상태였다. 네 명이 모서리 네 곳을 둘씩 나눠 쓰고
+        /// 있어서, 한 판에 두 명이 붙어 선 채 멈춰 있고 홀이 통째로 뚫렸다.
+        /// </summary>
+        static void ValidateGuardRoutes(StageData stage)
+        {
+            Vector2Int[][] routes = stage.guardRoutes;
+            if (routes == null) return;
+
+            for (int i = 0; i < routes.Length; i++)
+            {
+                // 1. 벽이나 선반 안에 찍힌 지점
+                foreach (Vector2Int p in routes[i])
+                {
+                    if (p.y < 0 || p.y >= stage.grid.Length || p.x < 0 || p.x >= stage.grid[0].Length)
+                    {
+                        Debug.LogWarning($"[StageBuilder] '{stage.displayName}' 경비 {i + 1} 의 순찰 지점 " +
+                                         $"({p.x},{p.y}) 이 격자 밖입니다.");
+                        continue;
+                    }
+
+                    char cell = stage.grid[p.y][p.x];
+                    if (cell == '#' || cell == 'X')
+                    {
+                        Debug.LogWarning($"[StageBuilder] '{stage.displayName}' 경비 {i + 1} 의 순찰 지점 " +
+                                         $"({p.x},{p.y}) 이 '{cell}' 입니다. 걸을 수 없는 칸입니다.");
+                    }
+                }
+
+                for (int j = i + 1; j < routes.Length; j++)
+                {
+                    // 2. 두 경비가 같은 칸을 목적지로 쓴다
+                    foreach (Vector2Int a in routes[i])
+                    foreach (Vector2Int b in routes[j])
+                    {
+                        if (a != b) continue;
+                        Debug.LogWarning($"[StageBuilder] '{stage.displayName}' 경비 {i + 1} 과 {j + 1} 이 " +
+                                         $"({a.x},{a.y}) 를 함께 목적지로 씁니다. 서로 막고 멈춥니다.");
+                    }
+
+                    // 3. 한쪽이 멈춰 서는 자리가 다른 쪽의 왕복선 한가운데다
+                    WarnStopOnPath(stage, routes[i], i + 1, routes[j], j + 1);
+                    WarnStopOnPath(stage, routes[j], j + 1, routes[i], i + 1);
+                }
+            }
+        }
+
+        /// <summary>walker 의 직선 구간 위에 stander 의 정지 지점이 놓여 있으면 경고한다.</summary>
+        static void WarnStopOnPath(StageData stage, Vector2Int[] walker, int walkerNo,
+                                   Vector2Int[] stander, int standerNo)
+        {
+            for (int s = 0; s < walker.Length; s++)
+            {
+                Vector2Int a = walker[s];
+                Vector2Int b = walker[(s + 1) % walker.Length];
+
+                foreach (Vector2Int p in stander)
+                {
+                    if (p == a || p == b) continue;   // 끝점 공유는 위에서 따로 잡는다
+
+                    bool onSegment =
+                        (a.x == b.x && a.x == p.x && p.y > Mathf.Min(a.y, b.y) && p.y < Mathf.Max(a.y, b.y)) ||
+                        (a.y == b.y && a.y == p.y && p.x > Mathf.Min(a.x, b.x) && p.x < Mathf.Max(a.x, b.x));
+
+                    if (!onSegment) continue;
+
+                    Debug.LogWarning($"[StageBuilder] '{stage.displayName}' 경비 {standerNo} 가 멈춰 서는 " +
+                                     $"({p.x},{p.y}) 가 경비 {walkerNo} 의 왕복선 위입니다. 지날 때마다 부딪힙니다.");
+                }
+            }
+        }
+
+        /// <summary>
         /// 격자 좌표(x, y) → 월드 좌표.
         ///
         ///   x: 가운데를 0으로 맞추기 위해 (전체너비-1)/2 를 뺀 뒤 칸 크기를 곱한다.
@@ -2310,7 +2398,9 @@ namespace Stealth.EditorTools
                 // 중앙 대공간을 가로/세로로 훑는 3명. 커버리지가 겹치는 게 의도다.
                 new[] { new Vector2Int(4, 5), new Vector2Int(20, 5) },
                 new[] { new Vector2Int(4, 9), new Vector2Int(20, 9) },
-                new[] { new Vector2Int(12, 5), new Vector2Int(12, 9) },
+                // (12,5)/(12,9) 에 세우면 위아래 두 경비의 왕복선 한가운데가 되어
+                // 지나갈 때마다 부딪힌다. 한 칸씩 안으로 당겨 정지 자리만 비켰다.
+                new[] { new Vector2Int(12, 6), new Vector2Int(12, 8) },
             },
             // 배회형 1명 — 중앙 대합실. 정전으로 건너야 하는 그 공간이다.
             roamRoutes = new[]
@@ -2508,11 +2598,17 @@ namespace Stealth.EditorTools
             },
             guardRoutes = new[]
             {
-                // 중앙 열람홀 — 1급 기밀이 있는 곳이라 넷이 둘러싼다
+                // 중앙 열람홀 — 1급 기밀이 있는 곳이라 넷이 둘러싼다.
+                //
+                // 네 명이 같은 모서리를 공유하면 안 된다. 예전에는 북/서가 (20,11) 을,
+                // 남/동이 (30,15) 를 함께 목적지로 삼았는데, 두 경비가 같은 칸에 서려고
+                // 밀어내다가 둘 다 도착 판정을 못 받아 그 자리에서 멈춰 버렸다.
+                // 홀을 지키는 넷 중 둘이 죽으니 무한모드의 중앙이 통째로 비었다.
+                // 이제 네 변이 각자 다른 칸을 쓴다. 도는 모양은 그대로다.
                 new[] { new Vector2Int(20, 11), new Vector2Int(30, 11) },   // 홀 북쪽
                 new[] { new Vector2Int(30, 15), new Vector2Int(20, 15) },   // 홀 남쪽
-                new[] { new Vector2Int(20, 11), new Vector2Int(20, 15) },   // 홀 서쪽
-                new[] { new Vector2Int(30, 15), new Vector2Int(30, 11) },   // 홀 동쪽
+                new[] { new Vector2Int(19, 12), new Vector2Int(19, 14) },   // 홀 서쪽
+                new[] { new Vector2Int(31, 14), new Vector2Int(31, 12) },   // 홀 동쪽
                 new[] { new Vector2Int(15, 5),  new Vector2Int(33, 5) },    // 북 서고
                 new[] { new Vector2Int(18, 19), new Vector2Int(32, 19) },   // 남 하역장
                 new[] { new Vector2Int(37, 13), new Vector2Int(44, 13) },   // 동 사무실

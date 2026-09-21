@@ -50,6 +50,8 @@ namespace Stealth
         public float lookAroundAngle = 65f;
         [Tooltip("제자리에서 고개를 돌리는 속도(도/초). 느릴수록 지나갈 틈이 넓어진다.")]
         public float scanTurnSpeed = 85f;
+        [Tooltip("목적지로 가는 중인데 이만큼 제자리에 굳어 있으면 그 목적지를 포기한다. 경비끼리 서로를 막았을 때 푸는 장치.")]
+        public float stuckTimeout = 3f;
         [Tooltip("수색 중 제자리에서 좌우로 살피는 각도. 기준 각도에서 ± 이만큼만 움직인다.")]
         public float searchLookAngle = 40f;
         [Tooltip("동전을 줍고 주위를 살피는 각도. 이 동안은 시야가 꺼져 있다.")]
@@ -130,6 +132,7 @@ namespace Stealth
         float lookBaseYaw;
         bool lookBaseSet;               // 기준 각도를 이미 잡았는가
         bool hasDestination;            // 목적지를 한 번이라도 준 적이 있는가
+        float stuckTimer;               // 목적지가 남았는데 못 움직인 시간
 
         // 셰이더 변수 이름을 숫자 ID로 바꿔 저장해 둔다.
         // SetColor("_BaseColor") 처럼 문자열로 부르면 매번 이름을 해싱해야 해서 느리다.
@@ -452,8 +455,13 @@ namespace Stealth
             {
                 scanStep = 0;     // 아직 걸어가는 중 — 두리번거리기 단계를 초기화
                 scanTimer = 0f;
+
+                // 못 가고 굳었으면 이 지점은 버리고 다음 지점으로 넘어간다.
+                if (StuckTooLong()) AdvanceWaypoint();
                 return;
             }
+
+            stuckTimer = 0f;
 
             // 기준 각도는 도착했을 때 한 번만 잡는다. 매 프레임 현재 각도를 다시 읽으면
             // 자기 출력이 입력으로 되먹임되어 회전이 누적된다.
@@ -662,7 +670,8 @@ namespace Stealth
                 return;
             }
 
-            if (ReachedDestination()) SetState(GuardState.Patrol);
+            // 복귀도 도착해야만 끝난다. 막혔으면 그 자리에서 순찰을 다시 시작한다.
+            if (ReachedDestination() || StuckTooLong()) SetState(GuardState.Patrol);
         }
 
         // --------------------------------------------------------------- 전이
@@ -796,6 +805,33 @@ namespace Stealth
         }
 
         /// <summary>목적지에 도착했는가.</summary>
+        /// <summary>
+        /// 목적지가 남았는데 제자리에 굳어 있는가.
+        ///
+        /// 경비 둘이 같은 칸을 목적지로 삼으면 서로를 밀어내다가 둘 다 도착하지 못한다.
+        /// remainingDistance 는 끝내 줄지 않는데 순찰은 <b>도착해야만</b> 다음 지점으로
+        /// 넘어가므로, 그 자리에서 영원히 굳는다. 실제로 무한모드 중앙 열람홀에서
+        /// 네 명이 모서리를 공유하고 있어 두 명씩 붙어 선 채 멈춰 있었다.
+        ///
+        /// 원인을 하나씩 막는 대신 결과를 본다 — 무엇 때문이든 못 가면 목적지를 버린다.
+        /// 문틀에 끼든, 베이크 경계에 걸리든, 경비끼리 막든 똑같이 풀린다.
+        /// </summary>
+        bool StuckTooLong()
+        {
+            // 경로를 아직 계산 중이거나 초당 0.2m 이상 움직이고 있으면 막힌 게 아니다.
+            if (agent.pathPending || agent.velocity.sqrMagnitude > 0.04f)
+            {
+                stuckTimer = 0f;
+                return false;
+            }
+
+            stuckTimer += Time.deltaTime;
+            if (stuckTimer < stuckTimeout) return false;
+
+            stuckTimer = 0f;
+            return true;
+        }
+
         bool ReachedDestination()
         {
             if (!agent.isOnNavMesh || !hasDestination) return true;
