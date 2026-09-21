@@ -28664,7 +28664,6 @@ MonoBehaviour:
   stageName: "STAGE 01 \xB7 \uCC3D\uACE0"
   requiredObjectives: 0
   endlessMode: 0
-  startImmediately: 0
   maxCaptures: 3
   respawnNoticeSeconds: 2.4
   fadeOutSeconds: 0.4

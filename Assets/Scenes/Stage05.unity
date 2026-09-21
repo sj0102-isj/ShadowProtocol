@@ -2071,7 +2071,6 @@ MonoBehaviour:
   stageName: "STAGE 05 \xB7 \uAE08\uACE0\uCE35"
   requiredObjectives: 0
   endlessMode: 0
-  startImmediately: 0
   maxCaptures: 3
   respawnNoticeSeconds: 2.4
   fadeOutSeconds: 0.4

@@ -42735,7 +42735,6 @@ MonoBehaviour:
   stageName: "ENDLESS \xB7 \uC9C0\uD558 \uC544\uCE74\uC774\uBE0C"
   requiredObjectives: 0
   endlessMode: 1
-  startImmediately: 0
   maxCaptures: 3
   respawnNoticeSeconds: 2.4
   fadeOutSeconds: 0.4

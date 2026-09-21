@@ -13067,7 +13067,6 @@ MonoBehaviour:
   stageName: "STAGE 03 \xB7 \uC0AC\uBB34\uB3D9"
   requiredObjectives: 0
   endlessMode: 0
-  startImmediately: 0
   maxCaptures: 3
   respawnNoticeSeconds: 2.4
   fadeOutSeconds: 0.4
