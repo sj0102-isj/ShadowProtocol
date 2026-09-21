@@ -17,7 +17,8 @@ namespace Stealth
         public static readonly List<PowerLever> All = new List<PowerLever>();
 
         [Header("Interaction")]
-        public float interactRange = 1.9f;
+        [Tooltip("레버에 E가 먹히는 거리. 격자 한 칸이 2.0m 라서 2.0 보다 작으면 레버 칸 위에 정확히 올라서야만 눌린다.")]
+        public float interactRange = 2.4f;
         [Tooltip("한 번 쓰고 다시 쓸 수 있을 때까지의 시간(초).")]
         public float cooldown = 20f;
         public string displayName = "두꺼비집";

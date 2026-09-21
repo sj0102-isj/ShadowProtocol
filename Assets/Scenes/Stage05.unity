@@ -52698,7 +52698,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e64e203fd54558b4a88f120ff153927a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Stealth.PowerLever
-  interactRange: 1.9
+  interactRange: 2.4
   cooldown: 20
   displayName: "\uB450\uAEBC\uBE44\uC9D1"
   handle: {fileID: 1076571066}
