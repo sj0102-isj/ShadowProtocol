@@ -549,8 +549,12 @@ namespace Stealth
             }
             else
             {
-                GUI.Label(new Rect(panel.x, panel.y + 112f, panel.width, 24f), "경비에게 붙잡혔다", centerStyle);
-                GUI.Label(new Rect(panel.x, panel.y + 146f, panel.width, 24f),
+                // 실패도 등급을 낸다. 클리어 판정은 아니지만 "도전했다"는 기록은 남는다.
+                // 성공 쪽과 같은 자리에 두어 두 화면이 같은 구조로 읽히게 한다.
+                GUI.Label(new Rect(panel.x, panel.y + 100f, panel.width, 32f), $"랭크   {gm.EvaluateRank()}",
+                    UIKit.Style(28, TextAnchor.MiddleCenter, accent, true));
+                GUI.Label(new Rect(panel.x, panel.y + 142f, panel.width, 24f), "경비에게 붙잡혔다", centerStyle);
+                GUI.Label(new Rect(panel.x, panel.y + 172f, panel.width, 24f),
                     $"생존 시간 {minutes:00}:{seconds:00}     회수 {gm.Collected}/{gm.Required}", centerStyle);
             }
 

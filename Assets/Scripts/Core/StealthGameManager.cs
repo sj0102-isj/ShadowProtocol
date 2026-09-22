@@ -347,14 +347,24 @@ namespace Stealth
         }
 
         /// <summary>
-        /// S / A / B / C 랭크. 얼마나 들키지 않았는가만 본다.
+        /// S / A / B / C 랭크. 몇 번 들켰는가만 본다.
         /// 잠입 게임에서 시간을 걸면 신중하게 플레이한 쪽이 손해를 보므로 시간은 보지 않는다.
+        ///
+        /// maxCaptures 가 3이라 성공한 판의 붙잡힘 횟수는 0 · 1 · 2 뿐이고 S · A · B 가 그 셋에 맞는다.
+        /// C 는 세 번 붙잡혀 실패한 경우다. 클리어가 아니므로 StageProgress 에 저장하지 않는다 —
+        /// MarkCleared 는 CompleteMission 에서만 부르기 때문에 저절로 그렇게 된다.
+        ///
+        /// 이전에는 DetectionCount 로 S 와 A 를 갈랐는데 A 가 나올 수 없었다.
+        /// 발각과 붙잡힘이 항상 같이 일어나기 때문이다 — GuardAI.EnterChase 와
+        /// SurveillanceDrone.Detect 가 ReportDetection 과 Capture 를 함께 부른다.
+        /// 그래서 두 카운트가 언제나 같고, "들켰지만 안 잡힘" 상태가 생기지 않는다.
         /// </summary>
         public string EvaluateRank()
         {
-            if (CaptureCount >= 2) return "C";
-            if (CaptureCount == 1) return "B";
-            return DetectionCount == 0 ? "S" : "A";   // 한 번도 안 들켰으면 S
+            if (CaptureCount >= maxCaptures) return "C";   // 세 번 붙잡혀 실패
+            if (CaptureCount == 0) return "S";             // 한 번도 안 들킴
+            if (CaptureCount == 1) return "A";             // 한 번 들킴
+            return "B";                                    // 두 번 들킴
         }
     }
 }
