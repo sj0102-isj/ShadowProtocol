@@ -99,7 +99,7 @@ namespace Stealth
 
             if (objective == null) return;
 
-            // 중앙의 고액 자료처럼 자리 자체가 의미인 것은 원래 자리에서 되살아난다.
+            // 중앙의 고득점 자료처럼 자리 자체가 의미인 것은 원래 자리에서 되살아난다.
             // 무작위로 옮기면 "위험한 한가운데를 뚫고 가서 먹는다"는 설계가 사라진다.
             if (objective.fixedSpawn)
             {

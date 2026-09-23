@@ -37,7 +37,7 @@ namespace Stealth
         Camera cam;
 
         static readonly Color KeyAccent = new Color(0.4f, 0.9f, 1f);     // 일반 상호작용 — 하늘색
-        static readonly Color PrizeAccent = new Color(0.45f, 1f, 0.95f); // 고액 자료 — 청록
+        static readonly Color PrizeAccent = new Color(0.45f, 1f, 0.95f); // 고득점 자료 — 청록
 
         void Awake() => menu = GetComponent<StealthMenuUI>();
 
@@ -316,7 +316,7 @@ namespace Stealth
             {
                 if (objective == null) continue;
 
-                // 쿨다운 중인 고액 자료는 바닥 원 한가운데에 남은 초를 띄운다.
+                // 쿨다운 중인 고득점 자료는 바닥 원 한가운데에 남은 초를 띄운다.
                 // 언제 다시 생기는지 보여야 "지금 중앙으로 갈지"를 판단할 수 있다.
                 if (objective.Collected)
                 {

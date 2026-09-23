@@ -25,7 +25,7 @@ namespace Stealth
         public bool fixedSpawn;
         [Tooltip(
             "회수 후 다시 나타나기까지의 시간(초). 0이면 즉시 되살아난다.\n" +
-            "고액 자료에 쿨다운을 두는 이유는, 없으면 위험한 한가운데만 반복해서 도는 것이 " +
+            "고득점 자료에 쿨다운을 두는 이유는, 없으면 위험한 한가운데만 반복해서 도는 것이 " +
             "최적해가 되어 맵의 나머지가 놀아버리기 때문이다.")]
         public float respawnDelay;
 

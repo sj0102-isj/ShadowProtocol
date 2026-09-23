@@ -26,7 +26,7 @@ namespace Stealth.EditorTools
     ///   E  탈출 구역
     ///   O  기밀 자료
     ///   L  두꺼비집  (F로 내리면 10초 정전)
-    ///   G  고액 자료 (5점. 제자리에서 되살아난다)
+    ///   G  고득점 자료 (5점. 제자리에서 되살아난다)
     ///   1~9 환풍구  (같은 숫자 두 칸이 짝. V로 반대쪽으로 이동)
     ///
     /// 공중 순찰 드론은 격자에 찍지 않고 StageData.droneRoutes 로 따로 준다. 벽을 무시하기 때문이다.
@@ -216,7 +216,7 @@ namespace Stealth.EditorTools
             List<Vector3> walkable = CollectWalkableCells(stage, width, height);
             int objectiveIndex = 1;
 
-            // 고액 자료(G)는 자리 자체가 설계라서 무한모드에서도 격자에 찍은 그대로 둔다.
+            // 고득점 자료(G)는 자리 자체가 설계라서 무한모드에서도 격자에 찍은 그대로 둔다.
             for (int y = 0; y < height; y++)
             {
                 for (int x = 0; x < width; x++)
@@ -1470,7 +1470,7 @@ namespace Stealth.EditorTools
         }
 
         /// <summary>
-        /// 기밀 자료. points 가 1보다 크면 "고액 자료"로 취급해서 크고 밝게 만들고,
+        /// 기밀 자료. points 가 1보다 크면 "고득점 자료"로 취급해서 크고 밝게 만들고,
         /// 무한모드에서도 무작위로 옮기지 않고 제자리에서 되살아나게 한다.
         /// 자리 자체가 위험하다는 것이 그 자료의 가치이기 때문이다.
         /// </summary>
@@ -1478,7 +1478,7 @@ namespace Stealth.EditorTools
         {
             bool prize = points > 1;
 
-            var objective = new GameObject(prize ? $"Objective {index} (고액)" : $"Objective {index}");
+            var objective = new GameObject(prize ? $"Objective {index} (고득점)" : $"Objective {index}");
             objective.transform.SetParent(parent, false);
             objective.transform.position = position;
 
@@ -1512,7 +1512,7 @@ namespace Stealth.EditorTools
                 sheet.GetComponent<Renderer>().sharedMaterial = paper;
             }
 
-            // 봉인 띠. 고액 자료는 붉은 '1급 기밀' 띠를 둘러 한눈에 구분되게 한다.
+            // 봉인 띠. 고득점 자료는 붉은 '1급 기밀' 띠를 둘러 한눈에 구분되게 한다.
             var seal = GameObject.CreatePrimitive(PrimitiveType.Cube);
             seal.name = "Seal";
             seal.transform.SetParent(visual.transform, false);
@@ -1537,7 +1537,7 @@ namespace Stealth.EditorTools
                 new Color(coreColor.r, coreColor.g, coreColor.b, prize ? 0.22f : 0.16f),
                 "Stealth/FOVCone");
 
-            // 고액 자료는 멀리서도 보이도록 스스로 빛난다. 중앙까지 갈 이유가 눈에 보여야 한다.
+            // 고득점 자료는 멀리서도 보이도록 스스로 빛난다. 중앙까지 갈 이유가 눈에 보여야 한다.
             if (prize)
             {
                 var glow = new GameObject("Glow");
@@ -2252,7 +2252,7 @@ namespace Stealth.EditorTools
 
         /// <summary>무한모드: 탈출구가 없고, 자료가 랜덤 위치에 계속 리스폰된다.</summary>
         public bool endless;
-        /// <summary>고액 자료(G) 한 개의 점수.</summary>
+        /// <summary>고득점 자료(G) 한 개의 점수.</summary>
         public int prizePoints = 5;
         public int endlessObjectiveCount = 5;
         public int endlessLives = 3;
