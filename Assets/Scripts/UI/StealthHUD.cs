@@ -192,15 +192,19 @@ namespace Stealth
             };
 
             // 붙잡힌 횟수가 곧 경보 단계이자 남은 기회다. 점으로 한눈에 보이게 그린다.
+            //   일반 스테이지 — "경보 단계": 붙잡힌 횟수. 0 에서 시작해 점이 하나씩 켜진다.
+            //   무한모드     — "목숨": 남은 횟수. 3 에서 시작해 점이 하나씩 꺼진다.
+            // 예전에는 무한모드도 붙잡힌 횟수를 그대로 적어서 "목숨 0 / 3" 으로 시작하고 잡힐수록 늘었다.
+            int shown = gm.endlessMode ? gm.maxCaptures - gm.CaptureCount : gm.CaptureCount;
             GUI.Label(new Rect(rect.x + 18f, rect.y + 96f, 110f, 24f), gm.endlessMode ? "목숨" : "경보 단계", labelStyle);
             for (int i = 0; i < gm.maxCaptures; i++)
             {
                 var dot = new Rect(rect.x + 122f + i * 20f, rect.y + 103f, 13f, 13f);
-                UIKit.Fill(dot, i < gm.CaptureCount ? alertColor : new Color(1f, 1f, 1f, 0.14f));
+                UIKit.Fill(dot, i < shown ? alertColor : new Color(1f, 1f, 1f, 0.14f));
                 UIKit.Outline(dot, new Color(1f, 1f, 1f, 0.22f));
             }
             GUI.Label(new Rect(rect.x + 128f + gm.maxCaptures * 20f, rect.y + 96f, 160f, 24f),
-                $"{gm.CaptureCount} / {gm.maxCaptures}",
+                $"{shown} / {gm.maxCaptures}",
                 UIKit.Style(15, TextAnchor.MiddleLeft, alertColor, true));
         }
 
@@ -264,7 +268,15 @@ namespace Stealth
             }
 
             // 드론은 경비와 별개로 경계도를 올린다. 둘 중 높은 쪽을 보여준다.
-            maxAwareness = Mathf.Max(maxAwareness, SurveillanceDrone.MaxAwareness);
+            float droneAwareness = SurveillanceDrone.MaxAwareness;
+            maxAwareness = Mathf.Max(maxAwareness, droneAwareness);
+
+            // 막대 위 글자도 드론과 경비가 같은 기준을 쓴다. 예전에는 글자가 경비 상태로만 정해져서,
+            // 드론이 게이지를 거의 다 채워도 "주의" 로만 나와 무엇 때문에 차는지 알 수 없었다.
+            // 경비가 의심 상태로 바뀌는 것과 같은 지점(게이지 0.35)에서 드론도 "의심 받는 중" 을 띄운다.
+            // 드론은 게이지가 꽉 차면 곧바로 붙잡으므로 그 뒤 단계는 필요 없다.
+            if (droneAwareness >= DroneSuspiciousAt && Priority(GuardState.Suspicious) > Priority(worst))
+                worst = GuardState.Suspicious;
 
             bool inHideSpot = player != null && player.IsHidden;
             bool underCover = player != null && player.IsUnderCover;
@@ -576,6 +588,9 @@ namespace Stealth
         }
 
         /// <summary>상태의 위험도 순위. 숫자가 클수록 위험하다. 가장 위험한 상태를 고르는 데 쓴다.</summary>
+        // GuardAI.suspiciousThreshold 의 기본값과 같게 둔다.
+        const float DroneSuspiciousAt = 0.35f;
+
         static int Priority(GuardState state) => state switch
         {
             GuardState.Chase => 4,

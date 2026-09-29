@@ -88,7 +88,10 @@ namespace Stealth
         void Awake()
         {
             Instance = this;
-            NoiseSystem.Clear();   // 이전 씬의 구독자가 남아 있으면 지운다
+            // 여기서 NoiseSystem.Clear() 를 부르지 않는다. 오브젝트마다 Awake·OnEnable 이 차례로 돌기 때문에,
+            // 이 매니저보다 먼저 깨어난 경비가 OnEnable 에서 이미 소리를 구독했을 수 있다.
+            // 그걸 지우면 그 경비는 이번 판 내내 발소리·대시를 못 듣는다(R/F5 재시작 뒤에 드러났다).
+            // 옛 씬의 구독자는 각자 OnDisable 에서 스스로 빠지므로 따로 지울 필요도 없다.
 
             // 재시작이나 스테이지 선택으로 들어왔다면 타이틀을 건너뛰고 바로 시작한다.
             if (GameSession.SkipTitle)
@@ -128,7 +131,8 @@ namespace Stealth
         void OnDestroy()
         {
             if (Instance == this) Instance = null;
-            NoiseSystem.Clear();
+            // 여기서도 Clear 하지 않는다. 씬을 다시 열 때 옛 매니저의 OnDestroy 가 새 씬의 경비가
+            // 구독을 마친 뒤에 도는 경우가 있어서(ExitZone.OnDestroy 참고), 새 경비의 귀를 막아 버린다.
         }
 
         void Update()
@@ -190,7 +194,6 @@ namespace Stealth
             // 씬을 다시 로드하기 전에 timeScale 을 1로 돌려놔야 한다.
             // 0인 채로 로드하면 새 씬도 멈춘 상태로 시작한다.
             Time.timeScale = 1f;
-            NoiseSystem.Clear();
             GameSession.SkipTitle = true;   // 새 씬의 Awake 가 이걸 보고 타이틀을 건너뛴다
 
             // buildIndex = 지금 씬의 번호. 이름 대신 번호로 같은 씬을 다시 연다.
@@ -203,7 +206,9 @@ namespace Stealth
             if (!StageCatalog.IsSelectable(entry)) return;
 
             Time.timeScale = 1f;
-            NoiseSystem.Clear();
+            // NoiseSystem.Clear() 를 부르지 않는다. 타이틀에서 지금 열린 스테이지를 고르면 씬을 다시 열지 않고
+            // 그대로 시작하는데(아래), 이때 지우면 이미 구독해 둔 경비 전원이 그 판 내내 대시 소리를 못 들었다.
+            // (1스테이지를 타이틀에서 시작하면 경비 5명, 구독 0 — 실제로 재어 보고 찾았다)
             GameSession.SkipTitle = true;
 
             if (entry.sceneName == SceneManager.GetActiveScene().name && !MissionStarted)
@@ -319,6 +324,11 @@ namespace Stealth
             RespawnNotice = respawnNoticeSeconds;
 
             if (player != null) player.Teleport(playerSpawnPosition, playerSpawnRotation);
+
+            // 카메라도 같이 옮긴다. 이 연출 동안 timeScale 이 0이라 카메라가 따라가지 못하다가,
+            // 화면이 밝아진 뒤 붙잡힌 자리에서 시작 지점까지 맵을 가로질러 날아갔다.
+            var follow = Camera.main != null ? Camera.main.GetComponent<IsoCameraFollow>() : null;
+            if (follow != null) follow.Snap();
 
             // 경비를 원래대로 돌려놓지 않으면 복귀 직후 전원이 발각 상태로 남는다.
             foreach (var guard in GuardAI.All)

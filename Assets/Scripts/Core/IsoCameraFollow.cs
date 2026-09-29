@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Stealth
@@ -23,8 +24,34 @@ namespace Stealth
         [Tooltip("플레이어가 바라보는 쪽을 살짝 미리 보여준다.")]
         public float lookAhead = 1.5f;
 
+        [Header("Wall Fade")]
+        [Tooltip(
+            "플레이어 둘레 이 반경 안의 바닥을 카메라에서 가리는 벽·선반을 반투명하게 한다.\n" +
+            "벽 높이 2.6m 에 55도로 내려다보면 벽 뒤 약 1.8m 의 바닥이 가려진다. 경비는 그 자리의 " +
+            "플레이어를 제대로 보고 있는데(벽은 카메라와 플레이어 사이에 있다) 발밑 시야 콘만 벽에 가려서 " +
+            "'콘이 안 보이는데 들킨다'가 됐다. 판정은 그대로 두고, 가리는 벽만 비춰 보이게 한다.")]
+        public float fadeRadius = 1.8f;
+        [Range(0f, 1f)] public float fadeAlpha = 0.3f;
+
         Camera cam;
         Vector3 currentFocus;   // 카메라가 지금 보고 있는 지점. 목표로 서서히 다가간다
+
+        // 반투명으로 바꾼 벽 하나의 기록. 원래 벽은 그림자만 남기고, 같은 모양의 반투명 사본을 대신 보여준다.
+        // (벽 머티리얼 자체를 반투명으로 바꾸면 그림자가 사라지고, 빌드에서 셰이더 변형이 빠질 수 있다)
+        class Faded
+        {
+            public Renderer wall;
+            public GameObject ghost;
+            public Renderer[] decor;      // 벽에 얹은 장식(테두리 등). 반투명일 때는 잠깐 끈다
+            public UnityEngine.Rendering.ShadowCastingMode shadow;
+            public float lastHit;
+            public bool on;
+        }
+
+        readonly Dictionary<Renderer, Faded> faded = new Dictionary<Renderer, Faded>();
+        readonly HashSet<Renderer> hitThisFrame = new HashSet<Renderer>();
+        readonly Dictionary<Material, Material> ghostMaterials = new Dictionary<Material, Material>();
+        static readonly RaycastHit[] fadeHits = new RaycastHit[16];
 
         void Awake()
         {
@@ -71,6 +98,131 @@ namespace Stealth
             // 그냥 Lerp(a, b, k * dt) 를 쓰면 프레임이 높은 컴퓨터에서 더 빨리 따라붙는다.
             currentFocus = Vector3.Lerp(currentFocus, desired, 1f - Mathf.Exp(-followLerp * Time.deltaTime));
 
+            ApplyPosition();
+            UpdateWallFade();
+        }
+
+        /// <summary>
+        /// 플레이어 둘레 바닥 25곳과 머리에서 카메라 쪽으로 레이를 쏴서, 걸리는 벽·선반·상인방을 반투명하게 한다.
+        /// 시야 콘은 건드리지 않는다 — 콘은 원래대로 벽에서 잘리고, 가려져 있던 부분이 보이게 될 뿐이다.
+        /// </summary>
+        void UpdateWallFade()
+        {
+            hitThisFrame.Clear();
+            Vector3 toCamera = -transform.forward;
+            Vector3 center = target.position;
+            float step = fadeRadius * 0.5f;
+
+            for (int ix = -2; ix <= 2; ix++)
+                for (int iz = -2; iz <= 2; iz++)
+                    CollectOccluders(center + new Vector3(ix * step, 0.1f, iz * step), toCamera);
+            CollectOccluders(center + Vector3.up * 1.7f, toCamera);
+
+            // 게임이 멈춘 화면(메뉴·붙잡힘 연출)에서도 벽 상태가 맞아야 해서 unscaled 시간을 쓴다.
+            float now = Time.unscaledTime;
+            foreach (Renderer r in hitThisFrame)
+            {
+                if (!faded.TryGetValue(r, out Faded f)) faded[r] = f = MakeFaded(r);
+                f.lastHit = now;
+                SetFaded(f, true);
+            }
+
+            // 바로 되돌리면 경계에서 벽이 깜박인다. 0.25초 동안 한 번도 안 걸렸을 때 되돌린다.
+            foreach (Faded f in faded.Values)
+                if (f.on && now - f.lastHit > 0.25f) SetFaded(f, false);
+        }
+
+        void CollectOccluders(Vector3 from, Vector3 dir)
+        {
+            int n = Physics.RaycastNonAlloc(from, dir, fadeHits, 60f, ~0, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < n; i++)
+            {
+                Collider col = fadeHits[i].collider;
+                if (col == null) continue;
+                string name = col.name;   // StageBuilder 가 붙인 이름. 벽·선반·크롤 상인방만 비춘다
+                if (!name.StartsWith("Wall_") && !name.StartsWith("Shelf_") && !name.StartsWith("Lintel_")) continue;
+                var r = col.GetComponent<Renderer>();
+                if (r != null) hitThisFrame.Add(r);
+            }
+        }
+
+        Faded MakeFaded(Renderer wall)
+        {
+            var f = new Faded { wall = wall, shadow = wall.shadowCastingMode };
+
+            var ghost = new GameObject("FadeGhost");
+            ghost.transform.SetParent(wall.transform, false);
+            // 벽은 정적(static)이라 실행 중에는 메시가 씬 전체의 합친 메시로 바뀌어 있다(정적 배칭).
+            // 그걸 복사하면 엉뚱한 모양이 되므로, 벽이 원래 정육면체였다는 점을 이용해 기본 큐브를 쓴다.
+            ghost.AddComponent<MeshFilter>().sharedMesh = CubeMesh;
+            var gr = ghost.AddComponent<MeshRenderer>();
+            gr.sharedMaterial = GhostMaterial(wall.sharedMaterial);
+            gr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            gr.receiveShadows = false;
+            ghost.SetActive(false);
+            f.ghost = ghost;
+
+            var decor = new List<Renderer>();
+            foreach (Renderer child in wall.GetComponentsInChildren<Renderer>(true))
+                if (child != wall && child != gr) decor.Add(child);
+            f.decor = decor.ToArray();
+            return f;
+        }
+
+        void SetFaded(Faded f, bool on)
+        {
+            if (f.on == on || f.wall == null) return;
+            f.on = on;
+            // 원래 벽은 그림자만 드리운다 — 바닥의 그림자가 갑자기 사라지면 더 눈에 띈다.
+            f.wall.shadowCastingMode = on ? UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly : f.shadow;
+            f.ghost.SetActive(on);
+            foreach (Renderer d in f.decor) if (d != null) d.enabled = !on;
+        }
+
+        /// <summary>
+        /// 벽 색 그대로, 반투명하게. 시야 콘과 같은 셰이더(Stealth/FOVCone)를 쓰는 이유는
+        /// 이미 모든 씬이 쓰고 있어서 빌드에 반드시 들어가기 때문이다.
+        /// </summary>
+        Material GhostMaterial(Material source)
+        {
+            if (source != null && ghostMaterials.TryGetValue(source, out Material m)) return m;
+            Shader shader = Shader.Find("Stealth/FOVCone");
+            if (shader == null) shader = Shader.Find("Universal Render Pipeline/Unlit");
+            m = new Material(shader) { name = "WallFadeGhost" };
+            Color c = source != null && source.HasProperty("_BaseColor") ? source.GetColor("_BaseColor") : Color.gray;
+            c.a = fadeAlpha;
+            m.SetColor("_BaseColor", c);
+            if (source != null) ghostMaterials[source] = m;
+            return m;
+        }
+
+        static Mesh cubeMesh;
+        static Mesh CubeMesh
+        {
+            get
+            {
+                if (cubeMesh == null) cubeMesh = Resources.GetBuiltinResource<Mesh>("Cube.fbx");
+                if (cubeMesh == null)
+                {
+                    // 임시 큐브는 콜라이더가 붙어 있어서, 한 프레임이라도 남으면 시야 레이에 걸린다. 즉시 지운다.
+                    var tmp = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    cubeMesh = tmp.GetComponent<MeshFilter>().sharedMesh;
+                    DestroyImmediate(tmp);
+                }
+                return cubeMesh;
+            }
+        }
+
+        void OnDestroy()
+        {
+            foreach (Material m in ghostMaterials.Values) if (m != null) Destroy(m);
+        }
+
+        /// <summary>보간 없이 곧바로 대상 위로 옮긴다. 순간이동(붙잡혀서 시작 지점으로)에 쓴다.</summary>
+        public void Snap()
+        {
+            if (target == null) return;
+            currentFocus = target.position + target.forward * lookAhead;
             ApplyPosition();
         }
 

@@ -307,7 +307,10 @@ namespace Stealth
                 {
                     EnterChase();       // 게이지가 꽉 찼다 = 발각
                 }
-                else if (Awareness >= suspiciousThreshold && State == GuardState.Patrol)
+                // 복귀(Return)도 순찰과 똑같이 반응한다. 예전에는 순찰만 여기로 와서, 순찰로 돌아가던 경비는
+                // 플레이어를 보고도 멈추지 않고 걸어가다가 게이지가 차는 순간 곧바로 붙잡았다.
+                else if (Awareness >= suspiciousThreshold
+                         && (State == GuardState.Patrol || State == GuardState.Return))
                 {
                     EnterSuspicious(player.transform.position);   // 절반쯤 찼다 = 의심
                 }
@@ -332,8 +335,16 @@ namespace Stealth
             if (State == GuardState.Chase) return;                            // 이미 발각이면 무의미
             if (source != null && source.GetComponent<Coin>() != null) return; // 동전은 따로 처리
 
-            float distance = Vector3.Distance(transform.position, position);
-            if (distance > radius * hearingMultiplier) return;   // 너무 멀어서 못 들었다
+            float reach = radius * hearingMultiplier;
+
+            // 먼저 직선 거리로 싸게 거른다. 직선으로도 멀면 걸어서는 무조건 더 멀다.
+            if ((transform.position - position).sqrMagnitude > reach * reach) return;
+
+            // 그다음 실제로 걸어가는 거리. 동전(AlertNearestToCoin)과 같은 규칙이다.
+            // 예전에는 직선 거리만 봐서, 벽 하나 너머 옆방 경비가 대시 소리를 듣고
+            // 한참을 돌아 찾으러 왔다. 소리가 난 자리가 NavMesh 밖이면(소품 옆 등) 가장 가까운 바닥으로 맞춘다.
+            if (NavMesh.SamplePosition(position, out NavMeshHit heard, 2f, NavMesh.AllAreas)
+                && WalkDistance(transform.position, heard.position, reach) > reach) return;
 
             // 발소리로는 방향만 어렴풋이 안다. 정확한 자리를 집어주면 너무 정확해진다.
             // insideUnitSphere = 반지름 1인 구 안의 임의의 점. 곱해서 오차 범위를 만든다.
