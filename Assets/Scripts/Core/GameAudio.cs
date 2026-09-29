@@ -170,8 +170,10 @@ namespace Stealth
             // 차이가 너무 크면 조용하다가 갑자기 놀라는 소리가 되어 그 자체로 거슬린다.
             //
             //                                                                     부드럽게  음량
-            Reg(Sfx.Footstep,      "Footstep",      Step(0.35f, 0.22f, 105f),         0.30f, 0.260f);
-            Reg(Sfx.FootstepCrawl, "FootstepCrawl", Step(0.22f, 0.08f, 72f),          0.45f, 0.148f);
+            // 발소리는 플레이 내내 0.45초마다 울려서 음량 차이보다 "계속 들린다"가 더 거슬린다.
+            // 0.26 · 0.148 에서 절반으로 내렸다(사용자 요청). 다른 소리와의 순서는 그대로다.
+            Reg(Sfx.Footstep,      "Footstep",      Step(0.35f, 0.22f, 105f),         0.30f, 0.130f);
+            Reg(Sfx.FootstepCrawl, "FootstepCrawl", Step(0.22f, 0.08f, 72f),          0.45f, 0.075f);
             // 대시. 동전 던지기와 같은 바람 소리지만 더 길고 굵게 — 몸이 움직이는 소리다.
             Reg(Sfx.Dash,          "Dash",          Whoosh(0.26f, 0.04f, 0.18f),      0.14f, 0.300f);
             Reg(Sfx.CoinThrow,     "CoinThrow",     Whoosh(0.20f, 0.05f, 0.22f),      0.16f, 0.157f);
