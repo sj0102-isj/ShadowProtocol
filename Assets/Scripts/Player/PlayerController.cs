@@ -144,7 +144,10 @@ namespace Stealth
         // transform.position 은 발밑(바닥) 좌표다. 거기서 위로 얼마나 올릴지를 더한다.
         // ?: 는 삼항 연산자 — "조건 ? 참일때값 : 거짓일때값".
         // 기어가면 0.45m, 서 있으면 1.2m 높이를 몸통 중심으로 본다.
-        public Vector3 EyePoint => transform.position + Vector3.up * (IsCrawling ? 0.45f : 1.2f);
+        public Vector3 EyePoint => transform.position + Vector3.up * (IsCrawling ? 0.45f : StandingEyeHeight);
+
+        /// <summary>서 있을 때 눈높이. 경비 둘레에 그리는 "인기척 원"의 크기를 이 값으로 계산한다.</summary>
+        public const float StandingEyeHeight = 1.2f;
 
         // ============================================================
         //  내부에서만 쓰는 변수들 (private — 접근 지정자를 안 쓰면 기본이 private)

@@ -32,6 +32,8 @@ namespace Stealth
         [Header("Cone Mesh")]
         [Tooltip("높을수록 부드럽지만 레이캐스트가 늘어난다.")]
         public int rayCount = 64;           // 부채꼴을 몇 조각으로 나눌지. 조각마다 레이를 한 번 쏜다
+        [Tooltip("등 뒤 인기척 원을 몇 조각으로 나눌지. 원이 작아서 적어도 충분하다.")]
+        public int backRayCount = 24;
         public float coneHeight = 0.06f;    // 바닥에서 살짝 띄우는 높이. 0이면 바닥과 겹쳐 지글거린다
         [Tooltip("콘 클리핑에 쓰는 레이 높이. 크롤 통로 상인방 바닥(1.25)보다 높아야 콘이 통로 아래로 새어나가지 않고, 은신 소품(0.90)보다는 높아야 엄폐 그림이 유지된다.")]
         public float rayHeight = 1.5f;
@@ -49,6 +51,22 @@ namespace Stealth
 
         /// <summary>경비의 눈 위치. 발밑 좌표에서 눈높이만큼 올린 지점.</summary>
         public Vector3 EyePosition => transform.position + Vector3.up * eyeHeight;
+
+        /// <summary>
+        /// 인기척 원의 바닥 반지름. proximityRadius 는 눈(1.65)에서 플레이어 눈까지의 직선 거리라,
+        /// 서 있는 플레이어(눈 1.2)면 바닥에서는 √(1.3² − 0.45²) ≈ 1.22m 가 된다.
+        /// 기어가는 플레이어는 눈이 더 낮아 실제로는 이보다 좁게(≈0.5m) 걸린다 — 원 밖이면 늘 안전하다.
+        /// </summary>
+        float ProximityFloorRadius
+        {
+            get
+            {
+                float dy = eyeHeight - PlayerController.StandingEyeHeight;
+                return Mathf.Sqrt(Mathf.Max(0f, proximityRadius * proximityRadius - dy * dy));
+            }
+        }
+
+        int BackStart => rayCount + 2;   // 등 뒤 원 테두리가 시작하는 꼭짓점 번호
 
         // --- 부채꼴 메시를 만들기 위한 부품들 ---
         // 메시(Mesh) = 3D 모양 데이터. "꼭짓점 목록" + "그 점들을 어떤 순서로 삼각형으로 이을지" 두 가지다.
@@ -112,12 +130,13 @@ namespace Stealth
             coneFilter.mesh = coneMesh;
 
             rayCount = Mathf.Max(8, rayCount);   // 최소 8 보장. 0이 들어오면 배열이 깨진다
+            backRayCount = Mathf.Max(4, backRayCount);
 
-            // 꼭짓점 개수 = 중심점 1개 + 부채꼴 테두리 (rayCount + 1)개
-            vertices = new Vector3[rayCount + 2];
+            // 꼭짓점 개수 = 중심점 1개 + 부채꼴 테두리 (rayCount + 1)개 + 등 뒤 원의 테두리 (backRayCount + 1)개
+            vertices = new Vector3[rayCount + 2 + backRayCount + 1];
 
-            // 삼각형 하나당 꼭짓점 번호 3개가 필요하므로 rayCount * 3
-            triangles = new int[rayCount * 3];
+            // 삼각형 하나당 꼭짓점 번호 3개가 필요하다
+            triangles = new int[(rayCount + backRayCount) * 3];
 
             // 순서표는 한 번만 만들면 된다. 매 프레임 바뀌는 건 꼭짓점 "위치"뿐이고
             // "어떻게 잇는지"는 그대로이기 때문이다.
@@ -127,6 +146,17 @@ namespace Stealth
                 triangles[i * 3] = 0;
                 triangles[i * 3 + 1] = i + 1;
                 triangles[i * 3 + 2] = i + 2;
+            }
+
+            // 등 뒤 원도 같은 중심점에서 피자 조각으로 잇는다. 앞쪽 부채꼴과 꼭짓점을 나눠 쓰지 않는다 —
+            // 부채꼴 끝(10m)과 원 테두리(1.2m)를 이으면 가느다란 삼각형이 튀어나오기 때문이다.
+            int b0 = BackStart;
+            for (int j = 0; j < backRayCount; j++)
+            {
+                int t = (rayCount + j) * 3;
+                triangles[t] = 0;
+                triangles[t + 1] = b0 + j;
+                triangles[t + 2] = b0 + j + 1;
             }
         }
 
@@ -195,6 +225,19 @@ namespace Stealth
 
                 // 꼭짓점은 부모 기준 좌표로 넣어야 하므로 localDir 을 쓴다. 거리는 벽에 막힌 지점까지.
                 vertices[i + 1] = localDir * CastVisionRay(origin, worldDir, viewDistance);
+            }
+
+            // 등 뒤 인기척 원 — 부채꼴이 끝난 오른쪽 끝(+fov/2)에서 한 바퀴 돌아 왼쪽 끝(-fov/2)까지.
+            // CanSee 는 이 거리 안이면 방향과 상관없이 알아채는데, 예전에는 화면에 아무것도 없어서
+            // "콘 밖인데 게이지가 찬다"로 보였다. 벽에 막히는 것도 콘과 똑같이 레이로 자른다.
+            float backRadius = ProximityFloorRadius;
+            float span = 360f - fovAngle;
+            for (int j = 0; j <= backRayCount; j++)
+            {
+                float angle = fovAngle * 0.5f + span * j / backRayCount;
+                Vector3 localDir = Quaternion.Euler(0f, angle, 0f) * Vector3.forward;
+                Vector3 worldDir = transform.TransformDirection(localDir);
+                vertices[BackStart + j] = localDir * CastVisionRay(origin, worldDir, backRadius);
             }
 
             coneMesh.Clear();                // 이전 내용을 비우고
